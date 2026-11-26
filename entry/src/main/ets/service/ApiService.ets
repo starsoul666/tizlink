@@ -6,7 +6,6 @@ import {
   AppSettings,
   AuthSession,
   createEmptySubscription,
-  InviteCodeItem,
   InviteSummary,
   NoticeItem,
   OrderItem,
@@ -27,6 +26,15 @@ export interface LoginPayload {
   authData: string;
   email: string;
   subscribeUrl: string;
+  subscription?: SubscriptionInfo;
+  nodes?: ProxyNode[];
+  inviteSummary?: InviteSummary;
+}
+
+export interface WhmcsSyncBundle {
+  subscription: SubscriptionInfo;
+  nodes: ProxyNode[];
+  inviteSummary: InviteSummary;
 }
 
 export interface CheckoutResult {
@@ -37,6 +45,7 @@ export interface CheckoutResult {
 
 export class ApiService {
   private static instance: ApiService | null = null;
+  private cachedWhmcsInvite: InviteSummary | null = null;
 
   static getInstance(): ApiService {
     if (!ApiService.instance) {
@@ -265,6 +274,195 @@ export class ApiService {
     return n / scale;
   }
 
+  private parseWhmcsLoginData(root: JsonMap, fallbackEmail: string): WhmcsSyncBundle {
+    const info: SubscriptionInfo = createEmptySubscription();
+    info.email = String(root['email'] ?? fallbackEmail);
+    info.balance = Number(root['balance'] ?? 0) || 0;
+
+    const invite: InviteSummary = {
+      codes: [],
+      registeredCount: 0,
+      commissionRate: 0,
+      commissionBalance: 0,
+      pendingCommission: 0
+    };
+    const aff = root['affiliate'] as JsonMap | undefined;
+    if (aff) {
+      const affId: string = String(aff['id'] ?? '');
+      if (affId.length > 0) {
+        invite.codes.push({ code: `AFF-${affId}`, status: 0, createdAt: this.parseTimestamp(aff['date']) });
+      }
+      invite.registeredCount = Number(aff['visitors'] ?? 0) || 0;
+      invite.commissionBalance = Number(aff['balance'] ?? 0) || 0;
+    }
+    this.cachedWhmcsInvite = invite;
+
+    const nodes: ProxyNode[] = [];
+    const pkgsRaw = root['package'];
+    if (Array.isArray(pkgsRaw) && pkgsRaw.length > 0) {
+      const pkg = pkgsRaw[0] as JsonMap;
+      info.planName = String(pkg['package_name'] ?? pkg['plan_name'] ?? 'TizLink 套餐');
+      info.uuid = String(pkg['uuid'] ?? '');
+      info.transferEnable = Number(pkg['transfer_enable'] ?? 0) || 0;
+      info.usedUpload = Number(pkg['upload'] ?? 0) || 0;
+      info.usedDownload = Number(pkg['download'] ?? 0) || 0;
+      info.expiredAt = this.parseTimestamp(pkg['next_due_date'] ?? pkg['expired_at']);
+      info.resetDay = Number(pkg['days_to_traffic_reset'] ?? pkg['reset_day'] ?? 0) || 0;
+      info.subscribeUrl = String(pkg['subscribe_url'] ?? pkg['subscription_url'] ?? '');
+
+      const rawNodes = pkg['node'];
+      if (Array.isArray(rawNodes)) {
+        const usedNames: Set<string> = new Set<string>();
+        for (let i: number = 0; i < rawNodes.length; i++) {
+          const parsed: ProxyNode | null = this.convertWhmcsNodeToProxy(
+            rawNodes[i] as JsonMap,
+            info.uuid,
+            i,
+            usedNames
+          );
+          if (parsed) {
+            nodes.push(parsed);
+          }
+        }
+      }
+    }
+
+    return {
+      subscription: info,
+      nodes: nodes,
+      inviteSummary: invite
+    };
+  }
+
+  private convertWhmcsNodeToProxy(
+    n: JsonMap,
+    pkgUuid: string,
+    index: number,
+    usedNames: Set<string>
+  ): ProxyNode | null {
+    const rawName: string = String(n['name'] ?? '').trim();
+    const server: string = String(n['address'] ?? n['server'] ?? '').trim();
+    const port: number = Number(n['client_port'] ?? n['port'] ?? 443) || 443;
+    const lastOnline: number = Number(n['last_online'] ?? 1) || 0;
+
+    // Skip informational banner entries (e.g. "官网：tizlink.com" with last_online=0)
+    if (server.length === 0 || (lastOnline === 0 && (rawName.includes('官网') || rawName.includes('通知')))) {
+      return null;
+    }
+
+    let uniqueName: string = rawName.length > 0 ? rawName : `Node-${index + 1}`;
+    if (usedNames.has(uniqueName)) {
+      let suffix: number = 2;
+      while (usedNames.has(`${uniqueName} #${suffix}`)) {
+        suffix++;
+      }
+      uniqueName = `${uniqueName} #${suffix}`;
+    }
+    usedNames.add(uniqueName);
+
+    const type: string = String(n['type'] ?? 'trojan').toLowerCase();
+    const uuidOrPwd: string = String(n['uuid'] ?? n['password'] ?? pkgUuid);
+    const sni: string = String(n['snidomain'] ?? n['sni'] ?? '');
+    const network: string = String(n['network'] ?? 'tcp').toLowerCase();
+    const tlsMode: string = String(n['tls'] ?? '').toLowerCase();
+    const netJson = n['network_settings_json'] as JsonMap | undefined;
+    const allowInsecure: boolean =
+      n['allow_insecure'] === true ||
+      n['allow_insecure'] === 1 ||
+      String(netJson?.['allowInsecure'] ?? '').toLowerCase() === 'true';
+
+    const countryFromApi: string = String(n['country'] ?? '').toUpperCase();
+    const detected = SubscriptionParser.detectCountry(uniqueName);
+    const countryCode: string = countryFromApi.length >= 2 ? countryFromApi : detected.code;
+    const regionLabel: string = detected.label;
+
+    const yaml: string[] = [
+      `  - name: ${SubscriptionParser.yamlQuote(uniqueName)}`,
+      `    type: ${type === 'shadowsocks' ? 'ss' : type}`,
+      `    server: ${SubscriptionParser.yamlQuote(server)}`,
+      `    port: ${port}`
+    ];
+
+    if (type === 'trojan') {
+      yaml.push(`    password: ${SubscriptionParser.yamlQuote(uuidOrPwd)}`);
+      if (sni.length > 0) {
+        yaml.push(`    sni: ${SubscriptionParser.yamlQuote(sni)}`);
+      }
+      yaml.push(`    skip-cert-verify: ${allowInsecure}`);
+      yaml.push(`    udp: true`);
+      if (network === 'ws') {
+        yaml.push(`    network: ws`);
+        yaml.push(`    ws-opts:`);
+        yaml.push(`      path: ${SubscriptionParser.yamlQuote(String(netJson?.['path'] ?? '/'))}`);
+      } else if (network === 'grpc') {
+        yaml.push(`    network: grpc`);
+        yaml.push(`    grpc-opts:`);
+        yaml.push(`      grpc-service-name: ${SubscriptionParser.yamlQuote(String(netJson?.['serviceName'] ?? ''))}`);
+      }
+    } else if (type === 'vless') {
+      yaml.push(`    uuid: ${SubscriptionParser.yamlQuote(uuidOrPwd)}`);
+      yaml.push(`    udp: true`);
+      yaml.push(`    tls: ${tlsMode === 'tls' || tlsMode === 'reality'}`);
+      yaml.push(`    network: ${SubscriptionParser.yamlQuote(network)}`);
+      if (sni.length > 0) {
+        yaml.push(`    servername: ${SubscriptionParser.yamlQuote(sni)}`);
+      }
+      if (allowInsecure) {
+        yaml.push(`    skip-cert-verify: true`);
+      }
+    } else if (type === 'vmess') {
+      yaml.push(`    uuid: ${SubscriptionParser.yamlQuote(uuidOrPwd)}`);
+      yaml.push(`    alterId: 0`);
+      yaml.push(`    cipher: auto`);
+      yaml.push(`    udp: true`);
+      yaml.push(`    tls: ${tlsMode === 'tls'}`);
+      yaml.push(`    network: ${SubscriptionParser.yamlQuote(network)}`);
+      if (sni.length > 0 && tlsMode === 'tls') {
+        yaml.push(`    servername: ${SubscriptionParser.yamlQuote(sni)}`);
+      }
+      if (allowInsecure) {
+        yaml.push(`    skip-cert-verify: true`);
+      }
+    } else if (type === 'aegis') {
+      yaml.push(`    password: ${SubscriptionParser.yamlQuote(uuidOrPwd)}`);
+      yaml.push(`    server-pubkey-b64: ${SubscriptionParser.yamlQuote(String(n['server_pubkey_b64'] ?? n['pubkey_b64'] ?? ''))}`);
+      yaml.push(`    sni: ${SubscriptionParser.yamlQuote(sni || server)}`);
+      yaml.push(`    host: ${SubscriptionParser.yamlQuote(String(n['host'] ?? (sni || server)))}`);
+      yaml.push(`    path: ${SubscriptionParser.yamlQuote(String(n['path'] ?? '/chat'))}`);
+      yaml.push(`    client-fingerprint: chrome`);
+      yaml.push(`    skip-cert-verify: ${allowInsecure}`);
+      yaml.push(`    udp: true`);
+    } else if (type === 'hysteria2' || type === 'hy2') {
+      yaml[1] = `    type: hysteria2`;
+      yaml.push(`    password: ${SubscriptionParser.yamlQuote(uuidOrPwd)}`);
+      if (sni.length > 0) {
+        yaml.push(`    sni: ${SubscriptionParser.yamlQuote(sni)}`);
+      }
+      yaml.push(`    skip-cert-verify: ${allowInsecure}`);
+    } else if (type === 'ss' || type === 'shadowsocks') {
+      yaml.push(`    cipher: ${SubscriptionParser.yamlQuote(String(n['cipher'] ?? n['method'] ?? 'aes-256-gcm'))}`);
+      yaml.push(`    password: ${SubscriptionParser.yamlQuote(uuidOrPwd)}`);
+      yaml.push(`    udp: true`);
+    } else {
+      yaml.push(`    password: ${SubscriptionParser.yamlQuote(uuidOrPwd)}`);
+      yaml.push(`    udp: true`);
+    }
+
+    const nodeId: string = String(n['id'] ?? `whmcs_${index}_${server}_${port}`);
+    return {
+      id: nodeId,
+      name: uniqueName,
+      type: type,
+      server: server,
+      port: port,
+      countryCode: countryCode,
+      regionLabel: regionLabel,
+      latencyMs: -1,
+      rawYamlLines: yaml,
+      rawUri: ''
+    };
+  }
+
   // ==================== AUTH ====================
 
   async login(
@@ -283,17 +481,19 @@ export class ApiService {
       if (!res.ok || !res.data) {
         return { ok: false, message: res.message };
       }
-      const d = (res.data['data'] as JsonMap | undefined) ?? res.data;
-      const token: string = String(d['token'] ?? d['auth_data'] ?? `whmcs:${email}`);
-      const subUrl: string = String(d['subscribe_url'] ?? d['subscription_url'] ?? '');
+      const token: string = String(res.data['token'] ?? `whmcs:${email}`);
+      const bundle: WhmcsSyncBundle = this.parseWhmcsLoginData(res.data, email);
       return {
         ok: true,
-        message: '登录成功',
+        message: `登录成功，已获取 ${bundle.nodes.length} 个节点`,
         data: {
           token: token,
           authData: token,
-          email: email,
-          subscribeUrl: subUrl
+          email: bundle.subscription.email || email,
+          subscribeUrl: bundle.subscription.subscribeUrl,
+          subscription: bundle.subscription,
+          nodes: bundle.nodes,
+          inviteSummary: bundle.inviteSummary
         }
       };
     }
@@ -324,6 +524,28 @@ export class ApiService {
         email: email,
         subscribeUrl: ''
       }
+    };
+  }
+
+  async syncWhmcsSession(
+    settings: AppSettings,
+    auth: AuthSession
+  ): Promise<ApiResult<WhmcsSyncBundle>> {
+    const res = await this.whmcsCall(settings, 'login', {
+      'X-User-Email': auth.email,
+      'X-User-Password': auth.savedPassword,
+      'X-User-Token': auth.token
+    }, {
+      'device_id': auth.deviceId
+    });
+    if (!res.ok || !res.data) {
+      return { ok: false, message: res.message };
+    }
+    const bundle: WhmcsSyncBundle = this.parseWhmcsLoginData(res.data, auth.email);
+    return {
+      ok: true,
+      message: `已同步 ${bundle.nodes.length} 个节点`,
+      data: bundle
     };
   }
 
@@ -366,12 +588,20 @@ export class ApiService {
       if (!res.ok || !res.data) {
         return { ok: false, message: res.message };
       }
-      const d = (res.data['data'] as JsonMap | undefined) ?? res.data;
-      const token: string = String(d['token'] ?? `whmcs:${email}`);
+      const token: string = String(res.data['token'] ?? `whmcs:${email}`);
+      const bundle: WhmcsSyncBundle = this.parseWhmcsLoginData(res.data, email);
       return {
         ok: true,
         message: '注册成功',
-        data: { token: token, authData: token, email: email, subscribeUrl: '' }
+        data: {
+          token: token,
+          authData: token,
+          email: email,
+          subscribeUrl: bundle.subscription.subscribeUrl,
+          subscription: bundle.subscription,
+          nodes: bundle.nodes,
+          inviteSummary: bundle.inviteSummary
+        }
       };
     }
 
@@ -484,27 +714,11 @@ export class ApiService {
     }
 
     if (settings.backendType === 'whmcs') {
-      const res = await this.whmcsCall(settings, 'getsubscription', {
-        'X-User-Email': auth.email,
-        'X-User-Password': auth.savedPassword,
-        'X-User-Token': auth.token
-      });
-      if (!res.ok || !res.data) {
-        return { ok: false, message: res.message };
+      const syncRes = await this.syncWhmcsSession(settings, auth);
+      if (!syncRes.ok || !syncRes.data) {
+        return { ok: false, message: syncRes.message };
       }
-      const d = (res.data['data'] as JsonMap | undefined) ?? res.data;
-      const info: SubscriptionInfo = createEmptySubscription();
-      info.planName = String(d['plan_name'] ?? d['product_name'] ?? d['name'] ?? 'TizLink 套餐');
-      info.subscribeUrl = String(d['subscribe_url'] ?? d['subscription_url'] ?? d['url'] ?? '');
-      info.expiredAt = this.parseTimestamp(d['expired_at'] ?? d['expire_time'] ?? d['nextduedate']);
-      info.transferEnable = Number(d['transfer_enable'] ?? d['traffic_total'] ?? d['total_traffic'] ?? 0) || 0;
-      info.usedUpload = Number(d['u'] ?? d['upload'] ?? 0) || 0;
-      info.usedDownload = Number(d['d'] ?? d['download'] ?? d['traffic_used'] ?? d['used_traffic'] ?? 0) || 0;
-      info.resetDay = Number(d['reset_day'] ?? d['days_to_traffic_reset'] ?? 0) || 0;
-      info.email = String(d['email'] ?? auth.email);
-      info.balance = Number(d['balance'] ?? d['credit'] ?? 0) || 0;
-      info.uuid = String(d['uuid'] ?? '');
-      return { ok: true, message: 'OK', data: info };
+      return { ok: true, message: 'OK', data: syncRes.data.subscription };
     }
 
     const base: string = this.getV2BoardBase(settings);
@@ -817,7 +1031,15 @@ export class ApiService {
     for (const item of rawList) {
       const m = item as JsonMap;
       const planObj = m['plan'] as JsonMap | undefined;
-      const rawStatus = m['status'];
+      const productsArr = m['products'];
+      let whmcsPlanName: string = '';
+      let whmcsPeriod: string = '';
+      if (Array.isArray(productsArr) && productsArr.length > 0) {
+        const firstProd = productsArr[0] as JsonMap;
+        whmcsPlanName = String(firstProd['name'] ?? '');
+        whmcsPeriod = String(firstProd['billing_cycle'] ?? '');
+      }
+      const rawStatus = m['invoice_status'] ?? m['status'];
       let statusNum: number = Number(rawStatus ?? 0) || 0;
       if (typeof rawStatus === 'string') {
         const sLower: string = rawStatus.toLowerCase();
@@ -830,9 +1052,9 @@ export class ApiService {
         }
       }
       orders.push({
-        tradeNo: String(m['trade_no'] ?? m['invoice_id'] ?? m['invoiceid'] ?? m['id'] ?? ''),
-        planName: String(planObj?.['name'] ?? m['plan_name'] ?? m['product_name'] ?? '订阅订单'),
-        period: String(m['period'] ?? m['billingcycle'] ?? 'monthly'),
+        tradeNo: String(m['order_num'] ?? m['trade_no'] ?? m['invoice_id'] ?? m['order_id'] ?? m['id'] ?? ''),
+        planName: whmcsPlanName || String(planObj?.['name'] ?? m['plan_name'] ?? '订阅订单'),
+        period: whmcsPeriod || String(m['period'] ?? m['billingcycle'] ?? 'monthly'),
         totalAmount: (Number(m['total_amount'] ?? m['amount'] ?? m['total'] ?? 0) || 0) / scale,
         status: statusNum,
         createdAt: this.parseTimestamp(m['created_at'] ?? m['date']),
@@ -859,6 +1081,9 @@ export class ApiService {
   // ==================== INVITE & NOTICES ====================
 
   async fetchInviteSummary(settings: AppSettings, auth: AuthSession): Promise<ApiResult<InviteSummary>> {
+    if (settings.backendType === 'whmcs' && this.cachedWhmcsInvite) {
+      return { ok: true, message: 'OK', data: this.cachedWhmcsInvite };
+    }
     const empty: InviteSummary = {
       codes: [],
       registeredCount: 0,
@@ -867,7 +1092,7 @@ export class ApiService {
       pendingCommission: 0
     };
     if (settings.backendType !== 'v2board') {
-      return { ok: true, message: '当前 TizLink 线路请在官网个人中心查看邀请返利', data: empty };
+      return { ok: true, message: 'OK', data: empty };
     }
 
     const base: string = this.getV2BoardBase(settings);

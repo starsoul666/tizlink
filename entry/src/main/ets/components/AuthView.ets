@@ -119,7 +119,13 @@ export struct AuthView {
       };
       this.auth = nextAuth;
       await StorageService.getInstance().saveAuth(nextAuth);
-      this.showToast(I18n.t('登录成功', 'Login successful'));
+      if (res.data.subscription) {
+        await StorageService.getInstance().saveSubscription(res.data.subscription);
+      }
+      if (res.data.nodes && res.data.nodes.length > 0) {
+        await StorageService.getInstance().saveNodes(res.data.nodes);
+      }
+      this.showToast(res.message);
       this.onAuthSuccess(res.data.subscribeUrl);
       return;
     }
@@ -426,10 +432,20 @@ export struct AuthView {
             if (this.showServerConfig) {
               Column({ space: 8 }) {
                 if (this.settings.backendType === 'whmcs') {
-                  Text(I18n.t('WHMCS API 地址', 'WHMCS API URL'))
-                    .fontSize(12)
-                    .fontColor(Theme.TEXT_MUTED)
-                    .width('100%')
+                  Row() {
+                    Text(I18n.t('WHMCS API 地址', 'WHMCS API URL'))
+                      .fontSize(12)
+                      .fontColor(Theme.TEXT_MUTED)
+                    Blank()
+                    Text(I18n.t('恢复默认', 'Reset Default'))
+                      .fontSize(12)
+                      .fontColor(Theme.ACCENT_MINT)
+                      .onClick(() => {
+                        this.settings.whmcsApiUrl = DEFAULT_WHMCS_API_URL;
+                        this.showToast(I18n.t('已恢复默认 TizLink API 地址', 'Restored default API URL'));
+                      })
+                  }
+                  .width('100%')
                   TextInput({ text: this.settings.whmcsApiUrl })
                     .fontSize(12)
                     .fontColor(Theme.TEXT_PRIMARY)

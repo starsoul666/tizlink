@@ -108,6 +108,26 @@ struct Index {
     const storage: StorageService = StorageService.getInstance();
 
     this.refreshingNodes = true;
+    if (this.settings.backendType === 'whmcs') {
+      const syncRes = await api.syncWhmcsSession(this.settings, this.auth);
+      if (syncRes.ok && syncRes.data) {
+        this.subscription = syncRes.data.subscription;
+        await storage.saveSubscription(syncRes.data.subscription);
+        if (syncRes.data.nodes.length > 0) {
+          this.nodes = syncRes.data.nodes;
+          await storage.saveNodes(syncRes.data.nodes);
+        }
+        if (showFeedback) {
+          this.showToast(syncRes.message);
+        }
+      } else if (showFeedback) {
+        this.showToast(syncRes.message);
+      }
+      this.refreshingNodes = false;
+      void this.loadPlans(false);
+      return;
+    }
+
     const subRes = await api.fetchSubscriptionInfo(this.settings, this.auth);
     if (subRes.ok && subRes.data) {
       this.subscription = subRes.data;
@@ -301,6 +321,20 @@ struct Index {
     this.checkingIp = false;
   }
 
+  private async handleAuthSuccess(subUrl: string): Promise<void> {
+    const storage: StorageService = StorageService.getInstance();
+    this.subscription = await storage.loadSubscription();
+    this.nodes = await storage.loadNodes();
+    if (subUrl.length > 0) {
+      this.subscription.subscribeUrl = subUrl;
+    }
+    if (this.settings.backendType === 'whmcs' && this.nodes.length > 0) {
+      void this.loadPlans(false);
+    } else {
+      void this.syncAllRemoteData(true);
+    }
+  }
+
   private async handleLogout(): Promise<void> {
     await VpnManager.getInstance().disconnect();
     await StorageService.getInstance().clearAuth();
@@ -335,10 +369,7 @@ struct Index {
           settings: $settings,
           auth: $auth,
           onAuthSuccess: (subUrl: string) => {
-            if (subUrl.length > 0) {
-              this.subscription.subscribeUrl = subUrl;
-            }
-            void this.syncAllRemoteData(true);
+            void this.handleAuthSuccess(subUrl);
           }
         })
       } else if (this.isWideLayout) {

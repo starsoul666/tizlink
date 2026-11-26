@@ -151,9 +151,13 @@ export class StorageService {
     }
     try {
       const saved = JSON.parse(raw) as Partial<AppSettings>;
+      const rawWhmcsUrl: string = (saved.whmcsApiUrl ?? defaults.whmcsApiUrl).trim();
+      const fixedWhmcsUrl: string = rawWhmcsUrl.includes('152.1p36.157.60')
+        ? defaults.whmcsApiUrl
+        : (rawWhmcsUrl.length > 0 ? rawWhmcsUrl : defaults.whmcsApiUrl);
       return {
         backendType: saved.backendType ?? defaults.backendType,
-        whmcsApiUrl: saved.whmcsApiUrl ?? defaults.whmcsApiUrl,
+        whmcsApiUrl: fixedWhmcsUrl,
         v2boardApiUrl: saved.v2boardApiUrl ?? defaults.v2boardApiUrl,
         manualSubscribeUrl: saved.manualSubscribeUrl ?? defaults.manualSubscribeUrl,
         routingMode: saved.routingMode ?? defaults.routingMode,
