@@ -822,6 +822,53 @@ export class ApiService {
     return { ok: true, message: 'OK', data: notices };
   }
 
+  // ==================== LINE DIAGNOSTICS & REGION DETECT ====================
+
+  async testApiLineLatency(apiUrl: string): Promise<number> {
+    const cleanUrl: string = apiUrl.trim();
+    if (cleanUrl.length === 0) {
+      return -2;
+    }
+    const start: number = Date.now();
+    try {
+      const res: http.HttpResponse = await this.requestWithRetry(
+        cleanUrl,
+        http.RequestMethod.POST,
+        {
+          'User-Agent': 'AegisClient-WHMCS/1.0',
+          'Accept': 'application/json',
+          'X-User-Act': 'getpaymentmethods'
+        }
+      );
+      if (res.responseCode >= 200 && res.responseCode < 300) {
+        return Math.max(1, Date.now() - start);
+      }
+      return -2;
+    } catch (_e) {
+      return -2;
+    }
+  }
+
+  async detectUserRegion(): Promise<'cn' | 'global'> {
+    try {
+      const res: ApiResult<string> = await this.requestText(
+        'http://ip-api.com/json?fields=countryCode',
+        { 'User-Agent': 'AegisClient-WHMCS/1.0' }
+      );
+      if (res.ok && res.data) {
+        const parsed = JSON.parse(res.data) as JsonMap;
+        const cc: string = String(parsed['countryCode'] ?? '').toUpperCase();
+        if (cc.length === 2) {
+          return cc === 'CN' ? 'cn' : 'global';
+        }
+      }
+    } catch (_e) {
+      // Fallback to timezone offset
+    }
+    const tzOffsetHours: number = -new Date().getTimezoneOffset() / 60;
+    return tzOffsetHours === 8 ? 'cn' : 'global';
+  }
+
   // ==================== EXIT IP CHECK ====================
 
   async fetchExitIp(): Promise<string> {

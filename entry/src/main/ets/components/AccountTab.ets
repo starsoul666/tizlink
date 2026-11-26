@@ -41,6 +41,7 @@ export struct AccountTab {
   @Link auth: AuthSession;
 
   onRefreshAccount: () => void = () => {};
+  onOpenLineSelector: () => void = () => {};
   onSettingsChanged: () => void = () => {};
   onLogout: () => void = () => {};
 
@@ -792,6 +793,10 @@ export struct AccountTab {
 
         // Split Tunneling & Chain Proxy & Diagnostics
         Column() {
+          this.buildMenuRow('📡', I18n.t('线路选择 (国内/国际与 API 测速)', 'Line Selection (CN/Global & API)'), () => {
+            this.onOpenLineSelector();
+          })
+          Divider().color(Theme.BORDER)
           this.buildMenuRow('📱', I18n.t('分应用代理 (Split Tunneling)', 'Per-App Split Tunneling'), () => {
             this.subView = 'split_tunnel';
           })

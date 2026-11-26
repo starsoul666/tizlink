@@ -20,6 +20,7 @@ import { VpnManager, VpnUpdateListener } from '../service/VpnManager';
 import { Theme } from '../components/Theme';
 import { AuthView } from '../components/AuthView';
 import { ConnectTab } from '../components/ConnectTab';
+import { LineSelectorSheet } from '../components/LineSelectorSheet';
 import { NodesTab } from '../components/NodesTab';
 import { PlansTab } from '../components/PlansTab';
 import { AccountTab } from '../components/AccountTab';
@@ -52,6 +53,7 @@ struct Index {
   @State refreshingNodes: boolean = false;
   @State refreshingPlans: boolean = false;
   @State testingLatency: boolean = false;
+  @State showLineSheet: boolean = false;
 
   private vpnListener: VpnUpdateListener = (state: VpnState, traffic: TrafficStats, errorMsg: string) => {
     this.vpnState = state;
@@ -254,8 +256,6 @@ struct Index {
   private async handleManualImport(imported: ProxyNode[], subUrl: string): Promise<void> {
     const storage: StorageService = StorageService.getInstance();
     if (subUrl.length > 0) {
-      this.settings.manualSubscribeUrl = subUrl;
-      await storage.saveSettings(this.settings);
       this.refreshingNodes = true;
       const res = await ApiService.getInstance().downloadAndParseNodes(subUrl);
       this.refreshingNodes = false;
@@ -295,6 +295,25 @@ struct Index {
     }
   }
 
+  private async handleLineSaved(regionChanged: boolean, apiChanged: boolean): Promise<void> {
+    if (apiChanged) {
+      await this.syncAllRemoteData(true);
+    } else if (regionChanged && this.vpnState === 'connected') {
+      this.showToast(I18n.t('线路区域已切换，正在重新连接...', 'Region updated, reconnecting...'));
+      await VpnManager.getInstance().connect(this.nodes, this.selectedNodeId, this.settings);
+    }
+  }
+
+  private getShortRegionLabel(): string {
+    if (this.settings.relayRegion === 'global') {
+      return I18n.t('国际', 'Global');
+    }
+    if (this.settings.relayRegion === 'auto') {
+      return I18n.t('自动', 'Auto');
+    }
+    return I18n.t('国内', 'CN');
+  }
+
   private async handleLogout(): Promise<void> {
     await VpnManager.getInstance().disconnect();
     await StorageService.getInstance().clearAuth();
@@ -303,8 +322,9 @@ struct Index {
   }
 
   build() {
-    Column() {
-      if (!this.ready) {
+    Stack() {
+      Column() {
+        if (!this.ready) {
         // Obsidian Splash Screen
         Column({ space: 14 }) {
           Image($r('app.media.app_icon'))
@@ -370,10 +390,26 @@ struct Index {
     .width('100%')
     .height('100%')
     .backgroundColor(Theme.BG)
-    .onAreaChange((_oldVal: Area, newVal: Area) => {
-      const w: number = Number(newVal.width) || 0;
-      this.isWideLayout = w >= 720;
-    })
+      .onAreaChange((_oldVal: Area, newVal: Area) => {
+        const w: number = Number(newVal.width) || 0;
+        this.isWideLayout = w >= 720;
+      })
+
+      if (this.showLineSheet) {
+        LineSelectorSheet({
+          settings: $settings,
+          onClose: () => {
+            this.showLineSheet = false;
+          },
+          onSaved: (regionChanged: boolean, apiChanged: boolean) => {
+            void this.handleLineSaved(regionChanged, apiChanged);
+          }
+        })
+      }
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor(Theme.BG)
   }
 
   @Builder
@@ -390,6 +426,22 @@ struct Index {
           .fontColor(Theme.TEXT_PRIMARY)
       }
       Blank()
+      // Line Selector Pill
+      Row({ space: 5 }) {
+        Text('📡')
+          .fontSize(11)
+        Text(`${I18n.t('线路', 'Line')}·${this.getShortRegionLabel()}`)
+          .fontSize(12)
+          .fontColor(Theme.TEXT_PRIMARY)
+      }
+      .padding({ left: 10, right: 10, top: 7, bottom: 7 })
+      .backgroundColor(Theme.SURFACE)
+      .borderRadius(12)
+      .border({ width: 1, color: Theme.BORDER })
+      .onClick(() => {
+        this.showLineSheet = true;
+      })
+
       // Quick Node List shortcut icon (top-right server stack icon like APK screenshot 4)
       Row({ space: 6 }) {
         Circle()
@@ -537,6 +589,9 @@ struct Index {
         onOpenNodes: () => {
           this.activeTab = 1;
         },
+        onOpenLineSelector: () => {
+          this.showLineSheet = true;
+        },
         onChangeRoutingMode: (mode: RoutingMode) => {
           void this.handleRoutingModeChange(mode);
         },
@@ -588,11 +643,14 @@ struct Index {
         onRefreshAccount: () => {
           void this.syncAllRemoteData(true);
         },
+        onOpenLineSelector: () => {
+          this.showLineSheet = true;
+        },
         onSettingsChanged: () => {
           // Force UI re-render on language/settings change
           this.settings = {
             whmcsApiUrl: this.settings.whmcsApiUrl,
-            manualSubscribeUrl: this.settings.manualSubscribeUrl,
+            apiLines: this.settings.apiLines,
             routingMode: this.settings.routingMode,
             relayRegion: this.settings.relayRegion,
             enableIpv6: this.settings.enableIpv6,

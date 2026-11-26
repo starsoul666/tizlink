@@ -96,9 +96,17 @@ export interface TrafficStats {
   downTotal: number;
 }
 
+export interface ApiLineItem {
+  id: string;
+  name: string;
+  url: string;
+  latencyMs: number;
+  isDefault: boolean;
+}
+
 export interface AppSettings {
   whmcsApiUrl: string;
-  manualSubscribeUrl: string;
+  apiLines: ApiLineItem[];
   routingMode: RoutingMode;
   relayRegion: RelayRegion;
   enableIpv6: boolean;
@@ -135,12 +143,24 @@ export const DEFAULT_WHMCS_API_URL: string =
 
 export const APP_VERSION: string = '2.0.20';
 
+export function createDefaultApiLines(): ApiLineItem[] {
+  return [
+    {
+      id: 'default_primary',
+      name: 'TizLink 官方主线路',
+      url: DEFAULT_WHMCS_API_URL,
+      latencyMs: -1,
+      isDefault: true
+    }
+  ];
+}
+
 export function createDefaultSettings(): AppSettings {
   return {
     whmcsApiUrl: DEFAULT_WHMCS_API_URL,
-    manualSubscribeUrl: '',
+    apiLines: createDefaultApiLines(),
     routingMode: 'rule',
-    relayRegion: 'auto',
+    relayRegion: 'cn',
     enableIpv6: false,
     enableFakeIp: true,
     mixedPort: 7890,

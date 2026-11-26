@@ -23,8 +23,19 @@ export struct ConnectTab {
 
   onToggleConnect: () => void = () => {};
   onOpenNodes: () => void = () => {};
+  onOpenLineSelector: () => void = () => {};
   onChangeRoutingMode: (mode: RoutingMode) => void = () => {};
   onCheckExitIp: () => void = () => {};
+
+  private getLineRegionName(): string {
+    if (this.settings.relayRegion === 'global') {
+      return I18n.t('国际线路', 'Global Line');
+    }
+    if (this.settings.relayRegion === 'auto') {
+      return I18n.t('自动匹配线路', 'Auto Line');
+    }
+    return I18n.t('国内线路', 'Domestic Line');
+  }
 
   private getStatusDotColor(): string {
     if (this.vpnState === 'connected') {
@@ -189,6 +200,57 @@ export struct ConnectTab {
         .border({ width: 1, color: Theme.BORDER })
         .onClick(() => {
           this.onOpenNodes();
+        })
+
+        // Line Selection Card (Domestic / Global / API Lines)
+        Row({ space: 12 }) {
+          Column() {
+            Text('📡')
+              .fontSize(16)
+          }
+          .width(42)
+          .height(42)
+          .borderRadius(12)
+          .backgroundColor('#1A2233')
+          .justifyContent(FlexAlign.Center)
+
+          Column({ space: 3 }) {
+            Text(I18n.t('线路选择', 'Line Selection'))
+              .fontSize(14)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(Theme.TEXT_PRIMARY)
+            Text(
+              this.settings.relayRegion === 'global'
+                ? I18n.t('当前：国际线路 · 适用于海外地区', 'Active: Global Line')
+                : this.settings.relayRegion === 'auto'
+                  ? I18n.t('当前：自动匹配 · 按地区智能接入', 'Active: Auto Region')
+                  : I18n.t('当前：国内线路 · 中国大陆优化接入', 'Active: Domestic Line (CN)')
+            )
+              .fontSize(12)
+              .fontColor(Theme.TEXT_SECONDARY)
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+
+          Text(this.getLineRegionName())
+            .fontSize(12)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(Theme.ACCENT_MINT)
+            .padding({ left: 9, right: 9, top: 4, bottom: 4 })
+            .backgroundColor('#162B2E')
+            .borderRadius(8)
+
+          Text('›')
+            .fontSize(20)
+            .fontColor(Theme.TEXT_SECONDARY)
+        }
+        .width('100%')
+        .padding({ left: 14, right: 16, top: 12, bottom: 12 })
+        .backgroundColor(Theme.SURFACE)
+        .borderRadius(18)
+        .border({ width: 1, color: Theme.BORDER })
+        .onClick(() => {
+          this.onOpenLineSelector();
         })
 
         // Routing Mode Switcher (Smart Rule vs Global)

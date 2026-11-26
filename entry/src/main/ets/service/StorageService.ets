@@ -3,8 +3,10 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import {
+  ApiLineItem,
   AppSettings,
   AuthSession,
+  createDefaultApiLines,
   createDefaultSettings,
   createEmptySubscription,
   ProxyNode,
@@ -153,9 +155,21 @@ export class StorageService {
       const fixedWhmcsUrl: string = rawWhmcsUrl.includes('152.1p36.157.60')
         ? defaults.whmcsApiUrl
         : (rawWhmcsUrl.length > 0 ? rawWhmcsUrl : defaults.whmcsApiUrl);
+      const rawLines: ApiLineItem[] = (saved.apiLines && saved.apiLines.length > 0)
+        ? saved.apiLines.map((line: ApiLineItem) => {
+            const fixedUrl: string = line.url.includes('152.1p36.157.60') ? defaults.whmcsApiUrl : line.url;
+            return {
+              id: line.id,
+              name: line.name,
+              url: fixedUrl,
+              latencyMs: line.latencyMs,
+              isDefault: line.isDefault
+            } as ApiLineItem;
+          })
+        : createDefaultApiLines();
       return {
         whmcsApiUrl: fixedWhmcsUrl,
-        manualSubscribeUrl: saved.manualSubscribeUrl ?? defaults.manualSubscribeUrl,
+        apiLines: rawLines,
         routingMode: saved.routingMode ?? defaults.routingMode,
         relayRegion: saved.relayRegion ?? defaults.relayRegion,
         enableIpv6: saved.enableIpv6 ?? defaults.enableIpv6,
