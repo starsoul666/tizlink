@@ -11,8 +11,8 @@ export class MihomoConfigBuilder {
 
     lines.push(`mixed-port: ${settings.mixedPort || 7890}`);
     lines.push(`socks-port: ${settings.socksPort || 7891}`);
-    lines.push(`allow-lan: ${settings.allowLan}`);
-    lines.push(`bind-address: ${settings.allowLan ? '*' : '127.0.0.1'}`);
+    lines.push(`allow-lan: ${settings.allowLan ? 'true' : 'false'}`);
+    lines.push(`bind-address: "${settings.allowLan ? '*' : '127.0.0.1'}"`);
     lines.push(`mode: ${settings.routingMode}`);
     lines.push(`log-level: ${settings.logLevel}`);
     lines.push(`ipv6: ${settings.enableIpv6}`);
