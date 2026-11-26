@@ -90,9 +90,11 @@ export struct AuthView {
       this.showToast(I18n.t('请输入邮箱', 'Please enter email'));
       return;
     }
-    if (cleanPwd.length < 6) {
-      this.showToast(I18n.t('密码长度不能少于 6 位', 'Password must be at least 6 characters'));
-      return;
+    if (this.mode !== 'reset' || this.settings.backendType !== 'whmcs') {
+      if (cleanPwd.length < 6) {
+        this.showToast(I18n.t('密码长度不能少于 6 位', 'Password must be at least 6 characters'));
+        return;
+      }
     }
 
     this.loading = true;

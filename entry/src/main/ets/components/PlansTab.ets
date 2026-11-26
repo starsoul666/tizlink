@@ -100,7 +100,8 @@ export struct PlansTab {
       this.auth,
       this.activePlan.id,
       this.selectedPeriodKey,
-      this.couponCode
+      this.couponCode,
+      this.selectedMethodId
     );
     if (!orderRes.ok || !orderRes.data) {
       this.submitting = false;
