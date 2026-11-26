@@ -5,6 +5,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <cstdlib>
 #include <dlfcn.h>
 #include <map>
 #include <mutex>
@@ -83,6 +84,9 @@ bool EnsureMihomoLoaded() {
     if (g_api.handle != nullptr) {
         return true;
     }
+
+    // Disable Go async SIGURG preemption so DevEco Studio lldb Debug mode never pauses the VPN process on signal 23
+    setenv("GODEBUG", "asyncpreemptoff=1", 0);
 
     dlerror();
     g_api.handle = dlopen("libmihomo.so", RTLD_NOW | RTLD_GLOBAL);
