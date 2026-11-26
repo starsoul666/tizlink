@@ -1,12 +1,14 @@
 import { promptAction } from '@kit.ArkUI';
 import {
-  APP_VERSION,
   AppSettings,
   AuthSession,
   createDefaultSettings,
   createEmptySubscription,
+  formatDate,
+  NoticeItem,
   PlanItem,
   ProxyNode,
+  RelayRegion,
   RoutingMode,
   SubscriptionInfo,
   TrafficStats,
@@ -20,17 +22,17 @@ import { VpnManager, VpnUpdateListener } from '../service/VpnManager';
 import { Theme } from '../components/Theme';
 import { AuthView } from '../components/AuthView';
 import { ConnectTab } from '../components/ConnectTab';
-import { LineSelectorSheet } from '../components/LineSelectorSheet';
 import { NodesTab } from '../components/NodesTab';
-import { PlansTab } from '../components/PlansTab';
 import { AccountTab } from '../components/AccountTab';
+import { SettingsTab } from '../components/SettingsTab';
+import { PlansTab } from '../components/PlansTab';
+import { LineSelectorSheet } from '../components/LineSelectorSheet';
 
 @Entry
 @Component
 struct Index {
   @State ready: boolean = false;
-  @State activeTab: number = 0; // 0: 连接, 1: 订阅, 2: 账户 (exact 3-tab APK layout)
-  @State isWideLayout: boolean = false;
+  @State activeTab: number = 0; // 0: 连接, 1: 节点, 2: 我的, 3: 设置 (exact 4-tab APK layout)
 
   @State settings: AppSettings = createDefaultSettings();
   @State auth: AuthSession = {
@@ -45,18 +47,33 @@ struct Index {
   @State nodes: ProxyNode[] = [];
   @State selectedNodeId: string = '';
   @State plans: PlanItem[] = [];
+  @State notices: NoticeItem[] = [];
 
   @State vpnState: VpnState = 'disconnected';
   @State traffic: TrafficStats = { up: 0, down: 0, upTotal: 0, downTotal: 0 };
+  @State connectedSeconds: number = 0;
+  @State publicIp: string = '--';
   @State refreshingNodes: boolean = false;
   @State refreshingPlans: boolean = false;
   @State testingLatency: boolean = false;
-  @State showNodesDrawer: boolean = false;
+
+  @State showPlansOverlay: boolean = false;
+  @State showNoticesOverlay: boolean = false;
   @State showLineSheet: boolean = false;
 
+  private durationTimerId: number = -1;
+
   private vpnListener: VpnUpdateListener = (state: VpnState, traffic: TrafficStats, errorMsg: string) => {
+    const prevState: VpnState = this.vpnState;
     this.vpnState = state;
     this.traffic = traffic;
+    if (state === 'connected' && prevState !== 'connected') {
+      this.startDurationTimer();
+      void this.refreshPublicIp();
+    } else if (state === 'disconnected') {
+      this.stopDurationTimer();
+      this.connectedSeconds = 0;
+    }
     if (errorMsg.length > 0) {
       this.showToast(errorMsg);
     }
@@ -67,7 +84,23 @@ struct Index {
   }
 
   aboutToDisappear(): void {
+    this.stopDurationTimer();
     VpnManager.getInstance().removeListener(this.vpnListener);
+  }
+
+  private startDurationTimer(): void {
+    this.stopDurationTimer();
+    this.connectedSeconds = 0;
+    this.durationTimerId = setInterval(() => {
+      this.connectedSeconds += 1;
+    }, 1000);
+  }
+
+  private stopDurationTimer(): void {
+    if (this.durationTimerId !== -1) {
+      clearInterval(this.durationTimerId);
+      this.durationTimerId = -1;
+    }
   }
 
   private async bootstrap(): Promise<void> {
@@ -84,6 +117,14 @@ struct Index {
 
     if (this.auth.loggedIn) {
       void this.syncAllRemoteData(false);
+      void this.refreshPublicIp();
+    }
+  }
+
+  private async refreshPublicIp(): Promise<void> {
+    const ip: string = await ApiService.getInstance().fetchExitIp();
+    if (ip.length > 0 && ip !== '--') {
+      this.publicIp = ip;
     }
   }
 
@@ -101,6 +142,10 @@ struct Index {
     }
     const found: ProxyNode | undefined = this.nodes.find((n: ProxyNode) => n.id === this.selectedNodeId);
     return found ?? null;
+  }
+
+  private getFirstNode(): ProxyNode | null {
+    return this.nodes.length > 0 ? this.nodes[0] : null;
   }
 
   private async syncAllRemoteData(showFeedback: boolean): Promise<void> {
@@ -137,6 +182,14 @@ struct Index {
     }
   }
 
+  private async openNoticesModal(): Promise<void> {
+    this.showNoticesOverlay = true;
+    const res = await ApiService.getInstance().fetchNotices(this.settings, this.auth);
+    if (res.ok && res.data) {
+      this.notices = res.data;
+    }
+  }
+
   private async handleToggleConnect(): Promise<void> {
     const vpn: VpnManager = VpnManager.getInstance();
     if (this.vpnState === 'connected' || this.vpnState === 'connecting') {
@@ -144,8 +197,8 @@ struct Index {
       return;
     }
     if (this.nodes.length === 0) {
-      this.showToast(I18n.t('暂无可用节点，请先刷新订阅', 'No nodes available'));
-      this.showNodesDrawer = true;
+      this.showToast(I18n.t('暂无可用节点，请先更新订阅', 'No nodes available'));
+      this.activeTab = 1;
       return;
     }
     const err: string = await vpn.connect(this.nodes, this.selectedNodeId, this.settings);
@@ -171,10 +224,36 @@ struct Index {
       }
     } else {
       const label: string = nodeId.length === 0
-        ? I18n.t('自动选择最佳可用节点', 'Auto Best Node')
+        ? I18n.t('自动选择最佳节点', 'Auto Best Node')
         : (this.nodes.find((n: ProxyNode) => n.id === nodeId)?.name ?? '');
       this.showToast(I18n.t(`已选择 ${label}`, `Selected ${label}`));
     }
+    this.activeTab = 0;
+  }
+
+  private cloneSettings(): AppSettings {
+    return {
+      whmcsApiUrl: this.settings.whmcsApiUrl,
+      apiLines: this.settings.apiLines,
+      routingMode: this.settings.routingMode,
+      relayRegion: this.settings.relayRegion,
+      enableIpv6: this.settings.enableIpv6,
+      enableFakeIp: this.settings.enableFakeIp,
+      mixedPort: this.settings.mixedPort,
+      socksPort: this.settings.socksPort,
+      allowLan: this.settings.allowLan,
+      controllerPort: this.settings.controllerPort,
+      customDns: this.settings.customDns,
+      customRules: this.settings.customRules,
+      splitTunnelEnabled: this.settings.splitTunnelEnabled,
+      splitTunnelMode: this.settings.splitTunnelMode,
+      splitTunnelApps: this.settings.splitTunnelApps,
+      chainProxy: this.settings.chainProxy,
+      crispWebsiteId: this.settings.crispWebsiteId,
+      telegramUrl: this.settings.telegramUrl,
+      language: this.settings.language,
+      logLevel: this.settings.logLevel
+    };
   }
 
   private async handleRoutingModeChange(mode: RoutingMode): Promise<void> {
@@ -182,6 +261,7 @@ struct Index {
       return;
     }
     this.settings.routingMode = mode;
+    this.settings = this.cloneSettings();
     await StorageService.getInstance().saveSettings(this.settings);
     if (this.vpnState === 'connected') {
       const ok: boolean = await VpnManager.getInstance().switchRoutingMode(mode, this.settings.controllerPort);
@@ -191,9 +271,26 @@ struct Index {
     }
     this.showToast(
       mode === 'rule'
-        ? I18n.t('已切换为智能分流模式', 'Switched to Smart Routing')
+        ? I18n.t('已切换为规则模式', 'Switched to Rule Mode')
         : I18n.t('已切换为全局模式', 'Switched to Global Mode')
     );
+  }
+
+  private async handleRegionChange(region: RelayRegion): Promise<void> {
+    if (this.settings.relayRegion === region) {
+      return;
+    }
+    this.settings.relayRegion = region;
+    this.settings = this.cloneSettings();
+    await StorageService.getInstance().saveSettings(this.settings);
+    this.showToast(
+      region === 'cn'
+        ? I18n.t('已切换为国内线路', 'Switched to Domestic Line')
+        : I18n.t('已切换为国际线路', 'Switched to Global Line')
+    );
+    if (this.vpnState === 'connected') {
+      await VpnManager.getInstance().connect(this.nodes, this.selectedNodeId, this.settings);
+    }
   }
 
   private async handleTestAllLatency(): Promise<void> {
@@ -258,6 +355,7 @@ struct Index {
     if (subUrl.length > 0) {
       this.subscription.subscribeUrl = subUrl;
     }
+    void this.refreshPublicIp();
     if (this.nodes.length > 0) {
       void this.loadPlans(false);
     } else {
@@ -279,105 +377,214 @@ struct Index {
     await StorageService.getInstance().clearAuth();
     this.auth = await StorageService.getInstance().loadAuth();
     this.activeTab = 0;
-    this.showNodesDrawer = false;
+    this.showPlansOverlay = false;
   }
 
   build() {
-    Stack() {
-      Column() {
-        if (!this.ready) {
-          Column({ space: 14 }) {
-            Image($r('app.media.app_icon'))
-              .width(72)
-              .height(72)
-              .borderRadius(18)
-            Text('TizLink')
-              .fontSize(28)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(Theme.TEXT_PRIMARY)
-            LoadingProgress()
-              .width(30)
-              .height(30)
-              .color(Theme.ACCENT_MINT)
-          }
-          .width('100%')
-          .height('100%')
-          .justifyContent(FlexAlign.Center)
-          .backgroundColor(Theme.BG)
-        } else if (!this.auth.loggedIn) {
-          AuthView({
-            settings: $settings,
-            auth: $auth,
-            onAuthSuccess: (subUrl: string) => {
-              void this.handleAuthSuccess(subUrl);
-            }
-          })
-        } else if (this.isWideLayout) {
-          // Wide Tablet / 2in1 3-tab Sidebar Shell (exact match to APK 6.png - 8.png)
-          Row() {
-            this.buildSidebarNav()
-            Column() {
-              this.buildTopHeader()
-              Column() {
-                this.buildActiveTabContent()
-              }
-              .layoutWeight(1)
-              .width('100%')
-            }
-            .layoutWeight(1)
-            .height('100%')
-          }
-          .width('100%')
-          .height('100%')
-          .backgroundColor(Theme.BG)
-        } else {
-          // Mobile 3-tab Bottom Pill Shell (exact match to APK 4.png - 5.png)
-          Column() {
-            this.buildTopHeader()
-            Column() {
-              this.buildActiveTabContent()
-            }
-            .layoutWeight(1)
-            .width('100%')
-
-            this.buildBottomPillNav()
-          }
-          .width('100%')
-          .height('100%')
-          .backgroundColor(Theme.BG)
+    Stack({ alignContent: Alignment.Bottom }) {
+      if (!this.ready) {
+        Column({ space: 14 }) {
+          Image($r('app.media.app_icon'))
+            .width(72)
+            .height(72)
+            .borderRadius(18)
+          Text('TizLink')
+            .fontSize(28)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(Theme.TEXT_PRIMARY)
+          LoadingProgress()
+            .width(30)
+            .height(30)
+            .color(Theme.ACCENT_BLUE)
         }
-      }
-      .width('100%')
-      .height('100%')
-      .backgroundColor(Theme.BG)
-      .onAreaChange((_oldVal: Area, newVal: Area) => {
-        const w: number = Number(newVal.width) || 0;
-        this.isWideLayout = w >= 720;
-      })
-
-      // Full-screen Node Selection Page triggered from top-right server icon (matching APK)
-      if (this.auth.loggedIn && this.showNodesDrawer) {
-        NodesTab({
-          nodes: $nodes,
-          selectedNodeId: $selectedNodeId,
-          refreshing: this.refreshingNodes,
-          testingLatency: this.testingLatency,
-          onSelectNode: (id: string) => {
-            void this.handleSelectNode(id);
-          },
-          onRefreshSubscription: () => {
-            void this.syncAllRemoteData(true);
-          },
-          onTestAllLatency: () => {
-            void this.handleTestAllLatency();
-          },
-          onTestSingleLatency: (node: ProxyNode) => {
-            void this.handleTestSingleLatency(node);
-          },
-          onClose: () => {
-            this.showNodesDrawer = false;
+        .width('100%')
+        .height('100%')
+        .justifyContent(FlexAlign.Center)
+        .backgroundColor(Theme.BG)
+      } else if (!this.auth.loggedIn) {
+        AuthView({
+          settings: $settings,
+          auth: $auth,
+          onAuthSuccess: (subUrl: string) => {
+            void this.handleAuthSuccess(subUrl);
           }
         })
+      } else {
+        // Main 4-Tab Content Area (full height, content scrolls behind floating pill nav like real APK!)
+        Column() {
+          if (this.activeTab === 0) {
+            ConnectTab({
+              vpnState: this.vpnState,
+              traffic: this.traffic,
+              connectedSeconds: this.connectedSeconds,
+              publicIp: this.publicIp,
+              subscription: this.subscription,
+              selectedNode: this.getSelectedNode(),
+              firstNode: this.getFirstNode(),
+              refreshing: this.refreshingNodes,
+              settings: $settings,
+              onToggleConnect: () => {
+                void this.handleToggleConnect();
+              },
+              onOpenNodes: () => {
+                this.activeTab = 1;
+              },
+              onRefreshSubscription: () => {
+                void this.syncAllRemoteData(true);
+              },
+              onOpenNotices: () => {
+                void this.openNoticesModal();
+              },
+              onOpenPlans: () => {
+                this.showPlansOverlay = true;
+                if (this.plans.length === 0) {
+                  void this.loadPlans(false);
+                }
+              },
+              onChangeRoutingMode: (mode: RoutingMode) => {
+                void this.handleRoutingModeChange(mode);
+              },
+              onChangeRegion: (region: RelayRegion) => {
+                void this.handleRegionChange(region);
+              }
+            })
+          } else if (this.activeTab === 1) {
+            NodesTab({
+              nodes: $nodes,
+              selectedNodeId: $selectedNodeId,
+              refreshing: this.refreshingNodes,
+              testingLatency: this.testingLatency,
+              onSelectNode: (id: string) => {
+                void this.handleSelectNode(id);
+              },
+              onRefreshSubscription: () => {
+                void this.syncAllRemoteData(true);
+              },
+              onTestAllLatency: () => {
+                void this.handleTestAllLatency();
+              },
+              onTestSingleLatency: (node: ProxyNode) => {
+                void this.handleTestSingleLatency(node);
+              }
+            })
+          } else if (this.activeTab === 2) {
+            AccountTab({
+              vpnState: this.vpnState,
+              subscription: this.subscription,
+              settings: $settings,
+              auth: $auth,
+              onRefreshAccount: () => {
+                void this.syncAllRemoteData(true);
+              },
+              onOpenPlans: () => {
+                this.showPlansOverlay = true;
+                if (this.plans.length === 0) {
+                  void this.loadPlans(false);
+                }
+              },
+              onLogout: () => {
+                void this.handleLogout();
+              }
+            })
+          } else {
+            SettingsTab({
+              settings: $settings,
+              onOpenLineSelector: () => {
+                this.showLineSheet = true;
+              },
+              onSettingsChanged: () => {
+                this.settings = this.cloneSettings();
+              }
+            })
+          }
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor(Theme.BG)
+
+        // Floating White 4-Tab Bottom Pill Navigation Bar (exact match to APK Screenshots #1, #2, #4)
+        this.buildFloatingBottomNav()
+      }
+
+      // Full-screen Plans Overlay (triggered from 🛒 订阅 / 续费订阅 / 升级套餐)
+      if (this.auth.loggedIn && this.showPlansOverlay) {
+        PlansTab({
+          plans: this.plans,
+          loading: this.refreshingPlans,
+          settings: this.settings,
+          auth: this.auth,
+          onRefreshPlans: () => {
+            void this.loadPlans(true);
+          },
+          onOrderCompleted: () => {
+            void this.syncAllRemoteData(true);
+          },
+          onClose: () => {
+            this.showPlansOverlay = false;
+          }
+        })
+      }
+
+      // Announcements Modal (triggered from top-right 🔔 bell on ConnectTab)
+      if (this.auth.loggedIn && this.showNoticesOverlay) {
+        Column() {
+          Column({ space: 12 }) {
+            Row() {
+              Text(I18n.t('系统公告', 'Announcements'))
+                .fontSize(18)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(Theme.TEXT_PRIMARY)
+              Blank()
+              Text('✕')
+                .fontSize(18)
+                .fontColor(Theme.TEXT_SECONDARY)
+                .onClick(() => {
+                  this.showNoticesOverlay = false;
+                })
+            }
+            .width('100%')
+
+            if (this.notices.length === 0) {
+              Text(I18n.t('暂无最新公告', 'No announcements'))
+                .fontSize(14)
+                .fontColor(Theme.TEXT_SECONDARY)
+                .margin({ top: 24, bottom: 24 })
+            } else {
+              Scroll() {
+                Column({ space: 10 }) {
+                  ForEach(this.notices, (n: NoticeItem) => {
+                    Column({ space: 6 }) {
+                      Row() {
+                        Text(n.title).fontSize(15).fontWeight(FontWeight.Bold).fontColor(Theme.TEXT_PRIMARY).layoutWeight(1)
+                        Text(formatDate(n.createdAt)).fontSize(11).fontColor(Theme.TEXT_MUTED)
+                      }.width('100%')
+                      Text(n.content.replace(/<[^>]+>/g, '').trim())
+                        .fontSize(13)
+                        .fontColor(Theme.TEXT_SECONDARY)
+                        .lineHeight(20)
+                    }
+                    .width('100%')
+                    .padding(14)
+                    .backgroundColor(Theme.SURFACE_SOFT)
+                    .borderRadius(14)
+                    .alignItems(HorizontalAlign.Start)
+                  }, (n: NoticeItem) => `${n.id}_${n.title}`)
+                }
+              }
+              .constraintSize({ maxHeight: 360 })
+            }
+          }
+          .width('90%')
+          .constraintSize({ maxWidth: 440 })
+          .padding(20)
+          .backgroundColor(Theme.SURFACE)
+          .borderRadius(22)
+          .shadow({ radius: 24, color: '#26000000', offsetY: 8 })
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#66000000')
+        .justifyContent(FlexAlign.Center)
       }
 
       if (this.showLineSheet) {
@@ -398,214 +605,47 @@ struct Index {
   }
 
   @Builder
-  private buildTopHeader() {
-    Row({ space: 10 }) {
-      if (!this.isWideLayout) {
-        Image($r('app.media.app_icon'))
-          .width(28)
-          .height(28)
-          .borderRadius(7)
-        Text('TizLink')
-          .fontSize(20)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(Theme.TEXT_PRIMARY)
-      }
-      Blank()
-      // Exact APK top-right server stack icon (opens Node Selector)
-      Column({ space: 4 }) {
-        Row().width(20).height(3).borderRadius(1.5).backgroundColor(Theme.TEXT_PRIMARY)
-        Row().width(20).height(3).borderRadius(1.5).backgroundColor(Theme.TEXT_PRIMARY)
-        Row().width(20).height(3).borderRadius(1.5).backgroundColor(Theme.TEXT_PRIMARY)
-      }
-      .width(40)
-      .height(40)
-      .justifyContent(FlexAlign.Center)
-      .alignItems(HorizontalAlign.Center)
-      .onClick(() => {
-        this.showNodesDrawer = true;
-      })
-    }
-    .width('100%')
-    .height(56)
-    .padding({ left: 18, right: 14 })
-    .backgroundColor(Theme.NAV_BG)
-    .border({ width: { bottom: 1 }, color: Theme.BORDER })
-  }
-
-  @Builder
-  private buildSidebarNav() {
-    Column() {
-      Row({ space: 10 }) {
-        Image($r('app.media.app_icon'))
-          .width(34)
-          .height(34)
-          .borderRadius(9)
-        Text('TizLink')
-          .fontSize(20)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(Theme.TEXT_PRIMARY)
-      }
-      .width('100%')
-      .padding({ left: 18, right: 18, top: 20, bottom: 20 })
-
-      Divider().color(Theme.BORDER)
-
-      Column({ space: 8 }) {
-        this.buildSidebarItem(0, '⏻', I18n.t('连接控制', 'Connect'))
-        this.buildSidebarItem(1, '💎', I18n.t('订阅方案', 'Plans'))
-        this.buildSidebarItem(2, '👤', I18n.t('账户信息', 'Account'))
-      }
-      .width('100%')
-      .padding(14)
-
-      Blank()
-
-      Text(`TIZLINK v${APP_VERSION}`)
-        .fontSize(11)
-        .fontColor(Theme.TEXT_MUTED)
-        .margin({ bottom: 18 })
-    }
-    .width(220)
-    .height('100%')
-    .backgroundColor(Theme.NAV_BG)
-    .border({ width: { right: 1 }, color: Theme.BORDER })
-  }
-
-  @Builder
-  private buildSidebarItem(index: number, icon: string, label: string) {
-    Row({ space: 12 }) {
-      Text(icon)
-        .fontSize(15)
-        .fontColor(this.activeTab === index ? Theme.TEXT_PRIMARY : Theme.TEXT_SECONDARY)
-      Text(label)
-        .fontSize(14)
-        .fontWeight(this.activeTab === index ? FontWeight.Bold : FontWeight.Normal)
-        .fontColor(this.activeTab === index ? Theme.TEXT_PRIMARY : Theme.TEXT_SECONDARY)
-    }
-    .width('100%')
-    .height(46)
-    .padding({ left: 16, right: 16 })
-    .borderRadius(14)
-    .backgroundColor(this.activeTab === index ? Theme.PILL_ACTIVE_BG : Color.Transparent)
-    .onClick(() => {
-      this.activeTab = index;
-    })
-  }
-
-  @Builder
-  private buildBottomPillNav() {
-    // Exact 3-tab floating dark pill bar (matching APK 4.png & 5.png)
+  private buildFloatingBottomNav() {
     Row() {
-      this.buildBottomTabItem(0, '⊞', I18n.t('连接', 'Connect'))
-      this.buildBottomTabItem(1, '◈', I18n.t('订阅', 'Plans'))
-      this.buildBottomTabItem(2, '👤', I18n.t('账户', 'Account'))
+      this.buildBottomTabItem(0, '⊞', I18n.t('连接', 'Connect'), Theme.ACCENT_BLUE_SOFT, Theme.ACCENT_BLUE)
+      this.buildBottomTabItem(1, '❖', I18n.t('节点', 'Nodes'), Theme.ACCENT_BLUE_SOFT, Theme.ACCENT_BLUE)
+      this.buildBottomTabItem(2, '👤', I18n.t('我的', 'Mine'), Theme.ACCENT_PURPLE_SOFT, Theme.ACCENT_PURPLE)
+      this.buildBottomTabItem(3, '⚙', I18n.t('设置', 'Settings'), Theme.ACCENT_TEAL_SOFT, Theme.ACCENT_TEAL)
     }
-    .width('86%')
-    .height(64)
+    .width('90%')
+    .constraintSize({ maxWidth: 460 })
+    .height(66)
     .padding({ left: 10, right: 10 })
-    .margin({ bottom: 16, top: 6 })
+    .margin({ bottom: 16 })
     .backgroundColor(Theme.NAV_BG)
-    .borderRadius(32)
-    .border({ width: 1, color: Theme.BORDER })
+    .borderRadius(33)
+    .border({ width: 1, color: '#EEF0F5' })
+    .shadow({ radius: 22, color: Theme.SHADOW_NAV, offsetY: 6 })
     .justifyContent(FlexAlign.SpaceAround)
   }
 
   @Builder
-  private buildBottomTabItem(index: number, icon: string, label: string) {
-    Row({ space: 8 }) {
+  private buildBottomTabItem(index: number, icon: string, label: string, activeBg: string, activeColor: string) {
+    Row({ space: 6 }) {
       Text(icon)
-        .fontSize(17)
-        .fontColor(this.activeTab === index ? Theme.TEXT_PRIMARY : Theme.TEXT_SECONDARY)
+        .fontSize(18)
+        .fontColor(this.activeTab === index ? activeColor : Theme.TEXT_SECONDARY)
       if (this.activeTab === index) {
         Text(label)
           .fontSize(14)
           .fontWeight(FontWeight.Bold)
-          .fontColor(Theme.TEXT_PRIMARY)
+          .fontColor(activeColor)
       }
     }
     .height(46)
     .padding({
-      left: this.activeTab === index ? 24 : 18,
-      right: this.activeTab === index ? 24 : 18
+      left: this.activeTab === index ? 18 : 14,
+      right: this.activeTab === index ? 18 : 14
     })
     .borderRadius(23)
-    .backgroundColor(this.activeTab === index ? Theme.PILL_ACTIVE_BG : Color.Transparent)
+    .backgroundColor(this.activeTab === index ? activeBg : Color.Transparent)
     .onClick(() => {
       this.activeTab = index;
     })
-  }
-
-  @Builder
-  private buildActiveTabContent() {
-    if (this.activeTab === 0) {
-      ConnectTab({
-        vpnState: this.vpnState,
-        traffic: this.traffic,
-        selectedNode: this.getSelectedNode(),
-        isWideLayout: this.isWideLayout,
-        settings: $settings,
-        onToggleConnect: () => {
-          void this.handleToggleConnect();
-        },
-        onOpenNodes: () => {
-          this.showNodesDrawer = true;
-        },
-        onOpenLineSelector: () => {
-          this.showLineSheet = true;
-        },
-        onChangeRoutingMode: (mode: RoutingMode) => {
-          void this.handleRoutingModeChange(mode);
-        }
-      })
-    } else if (this.activeTab === 1) {
-      PlansTab({
-        plans: this.plans,
-        loading: this.refreshingPlans,
-        settings: this.settings,
-        auth: this.auth,
-        onRefreshPlans: () => {
-          void this.loadPlans(true);
-        },
-        onOrderCompleted: () => {
-          void this.syncAllRemoteData(true);
-        }
-      })
-    } else {
-      AccountTab({
-        vpnState: this.vpnState,
-        subscription: this.subscription,
-        settings: $settings,
-        auth: $auth,
-        onRefreshAccount: () => {
-          void this.syncAllRemoteData(true);
-        },
-        onOpenLineSelector: () => {
-          this.showLineSheet = true;
-        },
-        onSettingsChanged: () => {
-          this.settings = {
-            whmcsApiUrl: this.settings.whmcsApiUrl,
-            apiLines: this.settings.apiLines,
-            routingMode: this.settings.routingMode,
-            relayRegion: this.settings.relayRegion,
-            enableIpv6: this.settings.enableIpv6,
-            enableFakeIp: this.settings.enableFakeIp,
-            mixedPort: this.settings.mixedPort,
-            controllerPort: this.settings.controllerPort,
-            splitTunnelEnabled: this.settings.splitTunnelEnabled,
-            splitTunnelMode: this.settings.splitTunnelMode,
-            splitTunnelApps: this.settings.splitTunnelApps,
-            chainProxy: this.settings.chainProxy,
-            crispWebsiteId: this.settings.crispWebsiteId,
-            telegramUrl: this.settings.telegramUrl,
-            language: this.settings.language,
-            logLevel: this.settings.logLevel
-          };
-        },
-        onLogout: () => {
-          void this.handleLogout();
-        }
-      })
-    }
   }
 }

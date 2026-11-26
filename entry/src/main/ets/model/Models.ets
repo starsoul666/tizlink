@@ -112,7 +112,11 @@ export interface AppSettings {
   enableIpv6: boolean;
   enableFakeIp: boolean;
   mixedPort: number;
+  socksPort: number;
+  allowLan: boolean;
   controllerPort: number;
+  customDns: string[];
+  customRules: string[];
   splitTunnelEnabled: boolean;
   splitTunnelMode: SplitTunnelMode;
   splitTunnelApps: string[];
@@ -164,7 +168,11 @@ export function createDefaultSettings(): AppSettings {
     enableIpv6: false,
     enableFakeIp: true,
     mixedPort: 7890,
+    socksPort: 7891,
+    allowLan: true,
     controllerPort: 9090,
+    customDns: [],
+    customRules: [],
     splitTunnelEnabled: false,
     splitTunnelMode: 'bypass',
     splitTunnelApps: [],
@@ -226,4 +234,37 @@ export function formatDate(unixSeconds: number): string {
   const m: string = String(d.getMonth() + 1).padStart(2, '0');
   const day: string = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+export function formatDuration(totalSeconds: number): string {
+  const safe: number = totalSeconds > 0 ? Math.floor(totalSeconds) : 0;
+  const hrs: number = Math.floor(safe / 3600);
+  const mins: number = Math.floor((safe % 3600) / 60);
+  const secs: number = safe % 60;
+  return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+export function getCountryFlag(code: string): string {
+  const upper: string = (code || '').toUpperCase();
+  if (upper === 'JP') return '🇯🇵';
+  if (upper === 'HK') return '🇭🇰';
+  if (upper === 'TW') return '🇹🇼';
+  if (upper === 'SG') return '🇸🇬';
+  if (upper === 'US') return '🇺🇸';
+  if (upper === 'KR') return '🇰🇷';
+  if (upper === 'UK' || upper === 'GB') return '🇬🇧';
+  if (upper === 'DE') return '🇩🇪';
+  if (upper === 'FR') return '🇫🇷';
+  if (upper === 'CA') return '🇨🇦';
+  if (upper === 'AU') return '🇦🇺';
+  if (upper === 'NL') return '🇳🇱';
+  if (upper === 'IN') return '🇮🇳';
+  if (upper === 'RU') return '🇷🇺';
+  if (upper === 'TR') return '🇹🇷';
+  if (upper === 'MY') return '🇲🇾';
+  if (upper === 'TH') return '🇹🇭';
+  if (upper === 'VN') return '🇻🇳';
+  if (upper === 'PH') return '🇵🇭';
+  if (upper === 'CN') return '🇨🇳';
+  return '🌐';
 }

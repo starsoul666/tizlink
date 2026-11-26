@@ -129,7 +129,11 @@ export struct LineSelectorSheet {
       enableIpv6: this.settings.enableIpv6,
       enableFakeIp: this.settings.enableFakeIp,
       mixedPort: this.settings.mixedPort,
+      socksPort: this.settings.socksPort,
+      allowLan: this.settings.allowLan,
       controllerPort: this.settings.controllerPort,
+      customDns: this.settings.customDns,
+      customRules: this.settings.customRules,
       splitTunnelEnabled: this.settings.splitTunnelEnabled,
       splitTunnelMode: this.settings.splitTunnelMode,
       splitTunnelApps: this.settings.splitTunnelApps,
@@ -186,11 +190,11 @@ export struct LineSelectorSheet {
             .fontWeight(FontWeight.Bold)
             .fontColor(Theme.TEXT_PRIMARY)
           Blank()
-          Button(this.testing ? I18n.t('检测中...', 'Testing...') : I18n.t('检测线路', 'Test Lines'))
+          Button(this.testing ? I18n.t('检测中...', 'Testing...') : I18n.t('检测线路', 'Test'))
             .height(32)
             .fontSize(12)
-            .fontColor(Theme.ACCENT_MINT)
-            .backgroundColor('#162B2E')
+            .fontColor(Theme.ACCENT_TEAL)
+            .backgroundColor(Theme.ACCENT_TEAL_SOFT)
             .borderRadius(9)
             .margin({ right: 10 })
             .enabled(!this.testing)
@@ -211,7 +215,6 @@ export struct LineSelectorSheet {
 
         Scroll() {
           Column({ space: 14 }) {
-            // Section 1: Domestic / Global Region Line Selection
             Row() {
               Text(I18n.t('接入区域线路', 'Region Line'))
                 .fontSize(13)
@@ -229,45 +232,34 @@ export struct LineSelectorSheet {
 
             Column({ space: 8 }) {
               this.buildRegionCard(
+                'auto',
+                I18n.t('自动选择（推荐）', 'Auto Select (Recommended)'),
+                I18n.t('根据当前网络自动选择最优线路', 'Automatically pick best line for your network')
+              )
+              this.buildRegionCard(
                 'cn',
                 I18n.t('国内线路', 'Domestic Line (CN)'),
-                I18n.t('适用于中国大陆地区，采用国内优化中转入口', 'For Mainland China users with optimized relay')
+                I18n.t('适用于中国大陆地区，采用国内优化中转入口', 'For Mainland China users')
               )
               this.buildRegionCard(
                 'global',
                 I18n.t('国际线路', 'Global Line'),
-                I18n.t('仅适用于中国大陆以外海外地区使用', 'For users outside Mainland China')
-              )
-              this.buildRegionCard(
-                'auto',
-                I18n.t('自动匹配', 'Auto Region'),
-                I18n.t('根据当前网络地区自动选择最优接入线路', 'Automatically pick best line by network location')
+                I18n.t('仅适用于中国大陆以外海外地区使用', 'For overseas users')
               )
             }
             .width('100%')
 
-            Text(
-              this.draftRegion === 'global'
-                ? I18n.t('提示：国际线路仅适用于中国大陆以外地区，在中国大陆使用可能导致无法正常连接。', 'Note: Global line is for overseas use only.')
-                : I18n.t('提示：国内线路仅适用于中国大陆地区，在海外使用请切换至国际线路。', 'Note: Domestic line is optimized for Mainland China.')
-            )
-              .fontSize(11)
-              .fontColor(Theme.TEXT_MUTED)
-              .lineHeight(17)
-              .width('100%')
-
             Divider().color(Theme.BORDER)
 
-            // Section 2: TizLink API Access Lines
             Row() {
-              Text(I18n.t('API 接入线路', 'API Access Lines'))
+              Text(I18n.t('API 节点', 'API Nodes'))
                 .fontSize(13)
                 .fontWeight(FontWeight.Medium)
                 .fontColor(Theme.TEXT_SECONDARY)
               Blank()
               Text(this.showAddLine ? I18n.t('收起', 'Hide') : I18n.t('+ 添加备用线路', '+ Add Backup'))
                 .fontSize(12)
-                .fontColor(Theme.ACCENT_MINT)
+                .fontColor(Theme.ACCENT_BLUE)
                 .onClick(() => {
                   this.showAddLine = !this.showAddLine;
                 })
@@ -281,7 +273,7 @@ export struct LineSelectorSheet {
                   .fontSize(13)
                   .fontColor(Theme.TEXT_PRIMARY)
                   .placeholderColor(Theme.TEXT_MUTED)
-                  .backgroundColor(Theme.INPUT_BG)
+                  .backgroundColor(Theme.SURFACE)
                   .borderRadius(10)
                   .border({ width: 1, color: Theme.BORDER })
                   .padding({ left: 10, right: 10 })
@@ -293,7 +285,7 @@ export struct LineSelectorSheet {
                   .fontSize(12)
                   .fontColor(Theme.TEXT_PRIMARY)
                   .placeholderColor(Theme.TEXT_MUTED)
-                  .backgroundColor(Theme.INPUT_BG)
+                  .backgroundColor(Theme.SURFACE)
                   .borderRadius(10)
                   .border({ width: 1, color: Theme.BORDER })
                   .padding({ left: 10, right: 10 })
@@ -305,17 +297,16 @@ export struct LineSelectorSheet {
                   .height(38)
                   .fontSize(13)
                   .borderRadius(10)
-                  .backgroundColor(Theme.SURFACE_ELEVATED)
-                  .fontColor(Theme.ACCENT_MINT)
+                  .backgroundColor(Theme.ACCENT_BLUE_SOFT)
+                  .fontColor(Theme.ACCENT_BLUE)
                   .onClick(() => {
                     this.handleAddCustomLine();
                   })
               }
               .width('100%')
               .padding(10)
-              .backgroundColor('#0F1218')
+              .backgroundColor(Theme.SURFACE_SOFT)
               .borderRadius(12)
-              .border({ width: 1, color: Theme.BORDER })
             }
 
             Column({ space: 8 }) {
@@ -362,18 +353,18 @@ export struct LineSelectorSheet {
 
                   if (this.draftApiUrl === line.url) {
                     Text('✓')
-                      .fontSize(15)
+                      .fontSize(16)
                       .fontWeight(FontWeight.Bold)
-                      .fontColor(Theme.ACCENT_MINT)
+                      .fontColor(Theme.ACCENT_BLUE)
                   }
                 }
                 .width('100%')
-                .padding({ left: 12, right: 12, top: 12, bottom: 12 })
-                .backgroundColor(this.draftApiUrl === line.url ? Theme.SURFACE_ELEVATED : Theme.INPUT_BG)
+                .padding(12)
+                .backgroundColor(this.draftApiUrl === line.url ? Theme.ACCENT_BLUE_SOFT : Theme.SURFACE_SOFT)
                 .borderRadius(12)
                 .border({
                   width: 1,
-                  color: this.draftApiUrl === line.url ? '#665EEAD4' : Theme.BORDER
+                  color: this.draftApiUrl === line.url ? Theme.ACCENT_BLUE : Theme.BORDER
                 })
                 .onClick(() => {
                   this.draftApiUrl = line.url;
@@ -386,13 +377,12 @@ export struct LineSelectorSheet {
         .constraintSize({ maxHeight: 420 })
         .scrollBar(BarState.Off)
 
-        // Save Button
-        Button(I18n.t('保存线路选择', 'Save Line Selection'))
+        Button(I18n.t('保存', 'Save'))
           .width('100%')
           .height(46)
           .borderRadius(14)
-          .backgroundColor(Theme.PRIMARY_BTN_BG)
-          .fontColor(Theme.PRIMARY_BTN_TEXT)
+          .backgroundColor(Theme.ACCENT_BLUE)
+          .fontColor(Color.White)
           .fontSize(15)
           .fontWeight(FontWeight.Bold)
           .onClick(() => {
@@ -404,11 +394,11 @@ export struct LineSelectorSheet {
       .padding(20)
       .backgroundColor(Theme.SURFACE)
       .borderRadius(22)
-      .border({ width: 1, color: Theme.BORDER_LIGHT })
+      .shadow({ radius: 24, color: '#26000000', offsetY: 8 })
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#B3000000')
+    .backgroundColor('#66000000')
     .justifyContent(FlexAlign.Center)
   }
 
@@ -419,10 +409,10 @@ export struct LineSelectorSheet {
         Text(title)
           .fontSize(14)
           .fontWeight(FontWeight.Medium)
-          .fontColor(this.draftRegion === region ? Theme.TEXT_PRIMARY : Theme.TEXT_SECONDARY)
+          .fontColor(this.draftRegion === region ? Theme.ACCENT_BLUE : Theme.TEXT_PRIMARY)
         Text(desc)
           .fontSize(11)
-          .fontColor(Theme.TEXT_MUTED)
+          .fontColor(Theme.TEXT_SECONDARY)
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
@@ -431,16 +421,16 @@ export struct LineSelectorSheet {
         Text('✓')
           .fontSize(16)
           .fontWeight(FontWeight.Bold)
-          .fontColor(Theme.ACCENT_MINT)
+          .fontColor(Theme.ACCENT_BLUE)
       }
     }
     .width('100%')
     .padding({ left: 14, right: 14, top: 11, bottom: 11 })
-    .backgroundColor(this.draftRegion === region ? Theme.SURFACE_ELEVATED : Theme.INPUT_BG)
+    .backgroundColor(this.draftRegion === region ? Theme.ACCENT_BLUE_SOFT : Theme.SURFACE_SOFT)
     .borderRadius(12)
     .border({
       width: 1,
-      color: this.draftRegion === region ? '#665EEAD4' : Theme.BORDER
+      color: this.draftRegion === region ? Theme.ACCENT_BLUE : Theme.BORDER
     })
     .onClick(() => {
       this.draftRegion = region;

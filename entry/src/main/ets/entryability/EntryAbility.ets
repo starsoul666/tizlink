@@ -11,7 +11,7 @@ export default class EntryAbility extends UIAbility {
   onCreate(_want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, TAG, 'TizLink EntryAbility onCreate');
     try {
-      this.context.getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_DARK);
+      this.context.getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT);
     } catch (_e) {
       // ignore on older runtimes
     }
@@ -33,12 +33,12 @@ export default class EntryAbility extends UIAbility {
 
     try {
       const mainWindow: window.Window = windowStage.getMainWindowSync();
-      mainWindow.setWindowBackgroundColor('#08090C');
+      mainWindow.setWindowBackgroundColor('#FFFFFF');
       await mainWindow.setWindowSystemBarProperties({
-        statusBarColor: '#08090C',
-        statusBarContentColor: '#FFFFFF',
-        navigationBarColor: '#08090C',
-        navigationBarContentColor: '#FFFFFF'
+        statusBarColor: '#FFFFFF',
+        statusBarContentColor: '#111827',
+        navigationBarColor: '#FFFFFF',
+        navigationBarContentColor: '#111827'
       });
     } catch (_e) {
       // ignore window styling failure in previewer

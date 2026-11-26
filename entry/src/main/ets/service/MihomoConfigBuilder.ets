@@ -9,9 +9,10 @@ export class MihomoConfigBuilder {
   ): string {
     const lines: string[] = [];
 
-    lines.push(`mixed-port: ${settings.mixedPort}`);
-    lines.push(`allow-lan: false`);
-    lines.push(`bind-address: 127.0.0.1`);
+    lines.push(`mixed-port: ${settings.mixedPort || 7890}`);
+    lines.push(`socks-port: ${settings.socksPort || 7891}`);
+    lines.push(`allow-lan: ${settings.allowLan}`);
+    lines.push(`bind-address: ${settings.allowLan ? '*' : '127.0.0.1'}`);
     lines.push(`mode: ${settings.routingMode}`);
     lines.push(`log-level: ${settings.logLevel}`);
     lines.push(`ipv6: ${settings.enableIpv6}`);
@@ -43,9 +44,18 @@ export class MihomoConfigBuilder {
     lines.push(`    - 223.5.5.5`);
     lines.push(`    - 119.29.29.29`);
     lines.push(`  nameserver:`);
-    lines.push(`    - 223.5.5.5`);
-    lines.push(`    - 119.29.29.29`);
-    lines.push(`    - https://223.5.5.5/dns-query`);
+    if (settings.customDns && settings.customDns.length > 0) {
+      for (const dnsServer of settings.customDns) {
+        const trimmed: string = dnsServer.trim();
+        if (trimmed.length > 0) {
+          lines.push(`    - ${trimmed}`);
+        }
+      }
+    } else {
+      lines.push(`    - 223.5.5.5`);
+      lines.push(`    - 119.29.29.29`);
+      lines.push(`    - https://223.5.5.5/dns-query`);
+    }
     lines.push(`  fallback:`);
     lines.push(`    - 8.8.8.8`);
     lines.push(`    - 1.1.1.1`);
@@ -125,8 +135,16 @@ export class MihomoConfigBuilder {
     }
     lines.push('');
 
-    // Rules (exact match with TizLink Android rules)
+    // Rules (custom rules highest priority, then TizLink Android rules)
     lines.push(`rules:`);
+    if (settings.customRules && settings.customRules.length > 0) {
+      for (const rule of settings.customRules) {
+        const trimmed: string = rule.trim();
+        if (trimmed.length > 0 && !trimmed.startsWith('#')) {
+          lines.push(`  - ${trimmed}`);
+        }
+      }
+    }
     if (settings.routingMode === 'global') {
       lines.push(`  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve`);
       lines.push(`  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve`);

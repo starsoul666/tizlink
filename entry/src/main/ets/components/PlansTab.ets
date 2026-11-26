@@ -24,6 +24,7 @@ export struct PlansTab {
 
   onRefreshPlans: () => void = () => {};
   onOrderCompleted: () => void = () => {};
+  onClose: () => void = () => {};
 
   @State activePlan: PlanItem | null = null;
   @State selectedPeriodKey: string = 'month_price';
@@ -31,6 +32,14 @@ export struct PlansTab {
   @State paymentMethods: PaymentMethod[] = [];
   @State selectedMethodId: string = '';
   @State submitting: boolean = false;
+
+  private showToast(msg: string): void {
+    try {
+      promptAction.showToast({ message: msg, duration: 2200 });
+    } catch (_e) {
+      // ignore
+    }
+  }
 
   private getPeriodOptions(plan: PlanItem): PeriodOption[] {
     const opts: PeriodOption[] = [];
@@ -105,7 +114,7 @@ export struct PlansTab {
     );
     if (!orderRes.ok || !orderRes.data) {
       this.submitting = false;
-      promptAction.showToast({ message: orderRes.message });
+      this.showToast(orderRes.message);
       return;
     }
     const tradeNo: string = orderRes.data;
@@ -117,11 +126,11 @@ export struct PlansTab {
     );
     this.submitting = false;
     if (!checkoutRes.ok || !checkoutRes.data) {
-      promptAction.showToast({ message: checkoutRes.message });
+      this.showToast(checkoutRes.message);
       return;
     }
     if (checkoutRes.data.paid) {
-      promptAction.showToast({ message: I18n.t('订阅已激活！', 'Your subscription has been activated!') });
+      this.showToast(I18n.t('订阅已激活！', 'Your subscription has been activated!'));
       this.activePlan = null;
       this.onOrderCompleted();
       return;
@@ -136,7 +145,7 @@ export struct PlansTab {
         }
       });
     } else {
-      promptAction.showToast({ message: I18n.t(`订单已创建 (${tradeNo})，请在“我的订单”查看`, `Order ${tradeNo} created`) });
+      this.showToast(I18n.t(`订单已创建 (${tradeNo})，请在“我的订单”查看`, `Order ${tradeNo} created`));
       this.activePlan = null;
     }
   }
@@ -144,35 +153,44 @@ export struct PlansTab {
   build() {
     Stack() {
       Column({ space: 14 }) {
-        // Header (exact match to APK screenshot 5 & 7)
-        Row() {
-          Text(I18n.t('选择方案', 'Choose a Plan'))
+        // Header Bar with Back Button
+        Row({ space: 8 }) {
+          Text('‹')
+            .fontSize(28)
+            .fontColor(Theme.TEXT_PRIMARY)
+            .width(34)
+            .height(34)
+            .textAlign(TextAlign.Center)
+            .onClick(() => {
+              this.onClose();
+            })
+
+          Text(I18n.t('订阅套餐', 'Subscription Plans'))
             .fontSize(20)
             .fontWeight(FontWeight.Bold)
             .fontColor(Theme.TEXT_PRIMARY)
           Blank()
           Text(this.loading ? I18n.t('刷新中...', 'Loading...') : I18n.t('刷新', 'Refresh'))
             .fontSize(14)
-            .fontColor(Theme.TEXT_SECONDARY)
+            .fontColor(Theme.ACCENT_BLUE)
             .onClick(() => {
               this.onRefreshPlans();
             })
         }
         .width('100%')
-        .padding({ left: 18, right: 18, top: 8 })
+        .padding({ left: 12, right: 20, top: 10, bottom: 2 })
 
         if (this.plans.length === 0) {
           Column({ space: 12 }) {
             Text('📦')
               .fontSize(40)
-            Text(I18n.t('暂无可订阅方案', 'No Plans Available'))
+            Text(I18n.t('暂无可订阅套餐', 'No Plans Available'))
               .fontSize(16)
               .fontColor(Theme.TEXT_PRIMARY)
             Text(I18n.t('点击右上角「刷新」获取最新套餐列表', 'Tap Refresh to load available plans'))
               .fontSize(13)
               .fontColor(Theme.TEXT_SECONDARY)
               .textAlign(TextAlign.Center)
-              .padding({ left: 32, right: 32 })
           }
           .layoutWeight(1)
           .width('100%')
@@ -181,7 +199,7 @@ export struct PlansTab {
           List({ space: 14 }) {
             ForEach(this.plans, (plan: PlanItem) => {
               ListItem() {
-                Column({ space: 16 }) {
+                Column({ space: 14 }) {
                   Row() {
                     Column({ space: 6 }) {
                       Text(plan.name)
@@ -199,14 +217,15 @@ export struct PlansTab {
                     .layoutWeight(1)
                     .alignItems(HorizontalAlign.Start)
 
-                    Text(`${plan.transferEnableGb} GB`)
-                      .fontSize(12)
-                      .fontWeight(FontWeight.Medium)
-                      .fontColor(Theme.TEXT_PRIMARY)
-                      .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-                      .backgroundColor(Theme.SURFACE_ELEVATED)
-                      .borderRadius(10)
-                      .border({ width: 1, color: Theme.BORDER })
+                    if (plan.transferEnableGb > 0) {
+                      Text(`${plan.transferEnableGb} GB`)
+                        .fontSize(12)
+                        .fontWeight(FontWeight.Medium)
+                        .fontColor(Theme.ACCENT_BLUE)
+                        .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                        .backgroundColor(Theme.ACCENT_BLUE_SOFT)
+                        .borderRadius(10)
+                    }
                   }
                   .width('100%')
                   .alignItems(VerticalAlign.Top)
@@ -218,7 +237,7 @@ export struct PlansTab {
                         .fontColor(Theme.TEXT_SECONDARY)
                         .margin({ top: 8 })
                       Text(`${this.getDisplayPrice(plan)}`)
-                        .fontSize(30)
+                        .fontSize(28)
                         .fontWeight(FontWeight.Bold)
                         .fontColor(Theme.TEXT_PRIMARY)
                     }
@@ -226,9 +245,9 @@ export struct PlansTab {
                     Button(this.getDisplayPrice(plan) === 0 ? I18n.t('立即体验', 'Try Now') : I18n.t('立即订阅', 'Subscribe'))
                       .height(40)
                       .padding({ left: 22, right: 22 })
-                      .borderRadius(14)
-                      .backgroundColor(Theme.PRIMARY_BTN_BG)
-                      .fontColor(Theme.PRIMARY_BTN_TEXT)
+                      .borderRadius(12)
+                      .backgroundColor(Theme.ACCENT_BLUE)
+                      .fontColor(Color.White)
                       .fontSize(14)
                       .fontWeight(FontWeight.Bold)
                       .onClick(() => {
@@ -239,21 +258,23 @@ export struct PlansTab {
                   .alignItems(VerticalAlign.Center)
                 }
                 .width('100%')
-                .padding(20)
+                .padding(18)
                 .backgroundColor(Theme.SURFACE)
-                .borderRadius(20)
+                .borderRadius(18)
                 .border({ width: 1, color: Theme.BORDER })
+                .shadow({ radius: 10, color: Theme.SHADOW_CARD, offsetY: 2 })
               }
             }, (plan: PlanItem) => `${plan.id}_${plan.name}`)
           }
           .width('100%')
           .layoutWeight(1)
-          .padding({ left: 18, right: 18, bottom: 16 })
+          .padding({ left: 20, right: 20, bottom: 20 })
           .scrollBar(BarState.Off)
         }
       }
       .width('100%')
       .height('100%')
+      .backgroundColor(Theme.BG)
 
       // Checkout Overlay Modal
       if (this.activePlan !== null) {
@@ -284,19 +305,19 @@ export struct PlansTab {
                 Column({ space: 2 }) {
                   Text(opt.label)
                     .fontSize(12)
-                    .fontColor(this.selectedPeriodKey === opt.key ? Theme.TEXT_PRIMARY : Theme.TEXT_SECONDARY)
+                    .fontColor(this.selectedPeriodKey === opt.key ? Theme.ACCENT_BLUE : Theme.TEXT_SECONDARY)
                   Text(`¥${opt.price}`)
                     .fontSize(14)
                     .fontWeight(FontWeight.Bold)
-                    .fontColor(this.selectedPeriodKey === opt.key ? Theme.ACCENT_MINT : Theme.TEXT_PRIMARY)
+                    .fontColor(this.selectedPeriodKey === opt.key ? Theme.ACCENT_BLUE : Theme.TEXT_PRIMARY)
                 }
                 .padding({ left: 14, right: 14, top: 8, bottom: 8 })
                 .margin({ right: 8, bottom: 8 })
-                .backgroundColor(this.selectedPeriodKey === opt.key ? Theme.SURFACE_ELEVATED : Theme.INPUT_BG)
+                .backgroundColor(this.selectedPeriodKey === opt.key ? Theme.ACCENT_BLUE_SOFT : Theme.SURFACE_SOFT)
                 .borderRadius(12)
                 .border({
                   width: 1,
-                  color: this.selectedPeriodKey === opt.key ? Theme.ACCENT_MINT : Theme.BORDER
+                  color: this.selectedPeriodKey === opt.key ? Theme.ACCENT_BLUE : Theme.BORDER
                 })
                 .onClick(() => {
                   this.selectedPeriodKey = opt.key;
@@ -310,9 +331,8 @@ export struct PlansTab {
               .fontSize(14)
               .fontColor(Theme.TEXT_PRIMARY)
               .placeholderColor(Theme.TEXT_MUTED)
-              .backgroundColor(Theme.INPUT_BG)
+              .backgroundColor(Theme.SURFACE_SOFT)
               .borderRadius(12)
-              .border({ width: 1, color: Theme.BORDER })
               .padding({ left: 12, right: 12 })
               .onChange((v: string) => {
                 this.couponCode = v;
@@ -327,13 +347,13 @@ export struct PlansTab {
                 ForEach(this.paymentMethods, (m: PaymentMethod) => {
                   Text(m.name)
                     .fontSize(13)
-                    .fontColor(this.selectedMethodId === m.id ? Theme.TEXT_PRIMARY : Theme.TEXT_SECONDARY)
+                    .fontColor(this.selectedMethodId === m.id ? Theme.ACCENT_BLUE : Theme.TEXT_SECONDARY)
                     .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-                    .backgroundColor(this.selectedMethodId === m.id ? Theme.SURFACE_ELEVATED : Theme.INPUT_BG)
+                    .backgroundColor(this.selectedMethodId === m.id ? Theme.ACCENT_BLUE_SOFT : Theme.SURFACE_SOFT)
                     .borderRadius(10)
                     .border({
                       width: 1,
-                      color: this.selectedMethodId === m.id ? Theme.ACCENT_MINT : Theme.BORDER
+                      color: this.selectedMethodId === m.id ? Theme.ACCENT_BLUE : Theme.BORDER
                     })
                     .onClick(() => {
                       this.selectedMethodId = m.id;
@@ -343,12 +363,12 @@ export struct PlansTab {
               .width('100%')
             }
 
-            Button(this.submitting ? I18n.t('正在提交订单...', 'Submitting order...') : I18n.t('确认下单并支付', 'Confirm & Pay'))
+            Button(this.submitting ? I18n.t('正在提交订单...', 'Submitting...') : I18n.t('确认下单并支付', 'Confirm & Pay'))
               .width('100%')
               .height(46)
               .borderRadius(14)
-              .backgroundColor(Theme.PRIMARY_BTN_BG)
-              .fontColor(Theme.PRIMARY_BTN_TEXT)
+              .backgroundColor(Theme.ACCENT_BLUE)
+              .fontColor(Color.White)
               .fontSize(15)
               .fontWeight(FontWeight.Bold)
               .enabled(!this.submitting)
@@ -361,15 +381,16 @@ export struct PlansTab {
           .padding(20)
           .backgroundColor(Theme.SURFACE)
           .borderRadius(22)
-          .border({ width: 1, color: Theme.BORDER_LIGHT })
+          .shadow({ radius: 24, color: '#26000000', offsetY: 8 })
         }
         .width('100%')
         .height('100%')
-        .backgroundColor('#AA000000')
+        .backgroundColor('#66000000')
         .justifyContent(FlexAlign.Center)
       }
     }
     .width('100%')
     .height('100%')
+    .backgroundColor(Theme.BG)
   }
 }
