@@ -1,0 +1,14 @@
+export const isCoreAvailable: () => boolean;
+export const setup: (homeDir: string) => string;
+export const startTun: (tunFd: number, configYaml: string) => string;
+export const stop: () => void;
+export const isRunning: () => boolean;
+export const setLogLevel: (level: string) => void;
+export const notifyNetworkChange: () => void;
+export const getTraffic: () => string;
+export const getVersion: () => string;
+export const getLogs: () => string;
+export const clearLogs: () => void;
+export const setProcessProtected: (enabled: boolean) => void;
+export const registerProtectCallback: (cb: ((reqId: number, fd: number) => void) | null) => void;
+export const resolveProtect: (reqId: number, ok: boolean) => void;

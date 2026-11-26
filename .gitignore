@@ -1,0 +1,12 @@
+.hvigor/
+.idea/
+oh_modules/
+entry/oh_modules/
+entry/build/
+entry/.cxx/
+build/
+local.properties
+.DS_Store
+*.log
+*.apk
+mihomo-core/.ohos-arm64-clang.sh

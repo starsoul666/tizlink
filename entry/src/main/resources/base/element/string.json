@@ -1,0 +1,20 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "TizLink HarmonyOS NEXT Client"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "TizLink Main UI Ability"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "TizLink"
+    },
+    {
+      "name": "vpn_extension_desc",
+      "value": "TizLink Mihomo VPN Extension Service"
+    }
+  ]
+}

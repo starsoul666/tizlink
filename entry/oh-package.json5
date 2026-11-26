@@ -1,0 +1,11 @@
+{
+  "name": "entry",
+  "version": "2.0.20",
+  "description": "TizLink HarmonyOS NEXT Entry Module",
+  "main": "",
+  "author": "TizLink",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "libtizlink_native.so": "file:./src/main/cpp/types/libtizlink_native"
+  }
+}

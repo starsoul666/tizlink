@@ -1,0 +1,6 @@
+{
+  "modelVersion": "5.0.0",
+  "description": "TizLink for HarmonyOS NEXT (Pure ArkTS + Mihomo Native Core)",
+  "dependencies": {},
+  "devDependencies": {}
+}
