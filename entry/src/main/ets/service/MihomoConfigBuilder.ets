@@ -43,12 +43,13 @@ export class MihomoConfigBuilder {
     lines.push(`    - 223.5.5.5`);
     lines.push(`    - 119.29.29.29`);
     lines.push(`  nameserver:`);
+    lines.push(`    - 223.5.5.5`);
+    lines.push(`    - 119.29.29.29`);
     lines.push(`    - https://223.5.5.5/dns-query`);
-    lines.push(`    - https://doh.pub/dns-query`);
     lines.push(`  fallback:`);
+    lines.push(`    - 8.8.8.8`);
+    lines.push(`    - 1.1.1.1`);
     lines.push(`    - https://dns.cloudflare.com/dns-query`);
-    lines.push(`    - tls://1.1.1.1`);
-    lines.push(`    - tls://8.8.8.8`);
     lines.push(`  fallback-filter:`);
     lines.push(`    geoip: true`);
     lines.push(`    geoip-code: CN`);

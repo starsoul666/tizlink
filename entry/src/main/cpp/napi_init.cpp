@@ -18,8 +18,10 @@
 namespace {
 
 typedef int (*ProtectFn)(int fd);
+typedef void (*LogFn)(const char* msg);
 typedef char* (*SetupFn)(char* homeDir);
 typedef void (*SetProtectCallbackFn)(ProtectFn fn);
+typedef void (*SetLogCallbackFn)(LogFn fn);
 typedef char* (*StartTunFn)(int tunFd, char* configYaml);
 typedef void (*StopFn)();
 typedef int (*IsRunningFn)();
@@ -35,6 +37,7 @@ struct MihomoApi {
     void* handle = nullptr;
     SetupFn setup = nullptr;
     SetProtectCallbackFn setProtectCallback = nullptr;
+    SetLogCallbackFn setLogCallback = nullptr;
     StartTunFn startTun = nullptr;
     StopFn stop = nullptr;
     IsRunningFn isRunning = nullptr;
@@ -50,6 +53,12 @@ struct MihomoApi {
 
 MihomoApi g_api;
 std::mutex g_apiMutex;
+
+void NativeLogBridge(const char* msg) {
+    if (msg != nullptr) {
+        OH_LOG_INFO(LOG_APP, "[Mihomo] %{public}s", msg);
+    }
+}
 
 // Socket protection bridge: Go goroutine -> ThreadsafeFunction -> ArkTS vpnConnection.protect(fd)
 std::mutex g_protectMutex;
@@ -86,6 +95,7 @@ bool EnsureMihomoLoaded() {
 
     g_api.setup = reinterpret_cast<SetupFn>(dlsym(g_api.handle, "Setup"));
     g_api.setProtectCallback = reinterpret_cast<SetProtectCallbackFn>(dlsym(g_api.handle, "SetProtectCallback"));
+    g_api.setLogCallback = reinterpret_cast<SetLogCallbackFn>(dlsym(g_api.handle, "SetLogCallback"));
     g_api.startTun = reinterpret_cast<StartTunFn>(dlsym(g_api.handle, "StartTun"));
     g_api.stop = reinterpret_cast<StopFn>(dlsym(g_api.handle, "Stop"));
     g_api.isRunning = reinterpret_cast<IsRunningFn>(dlsym(g_api.handle, "IsRunning"));
@@ -101,6 +111,9 @@ bool EnsureMihomoLoaded() {
         g_api.loadError = "libmihomo.so missing required symbols";
         OH_LOG_ERROR(LOG_APP, "%{public}s", g_api.loadError.c_str());
         return false;
+    }
+    if (g_api.setLogCallback) {
+        g_api.setLogCallback(NativeLogBridge);
     }
     OH_LOG_INFO(LOG_APP, "libmihomo.so loaded successfully");
     return true;
@@ -195,10 +208,13 @@ int NativeProtectBridge(int fd) {
     bool ok = true;
     {
         std::unique_lock<std::mutex> rlock(req.mu);
-        if (req.cv.wait_for(rlock, std::chrono::milliseconds(500), [&req]() { return req.done; })) {
+        if (req.cv.wait_for(rlock, std::chrono::milliseconds(2000), [&req]() { return req.done; })) {
             ok = req.ok;
+            if (!ok) {
+                OH_LOG_WARN(LOG_APP, "protect(%{public}d) returned false", fd);
+            }
         } else {
-            OH_LOG_WARN(LOG_APP, "protect(%{public}d) timed out", fd);
+            OH_LOG_WARN(LOG_APP, "protect(%{public}d) timed out after 2000ms", fd);
             ok = true;
         }
     }
@@ -262,6 +278,61 @@ napi_value NapiStartTun(napi_env env, napi_callback_info info) {
     napi_value out;
     napi_create_string_utf8(env, result.c_str(), result.size(), &out);
     return out;
+}
+
+struct StartTunAsyncData {
+    napi_async_work work = nullptr;
+    napi_deferred deferred = nullptr;
+    int32_t tunFd = -1;
+    std::string yaml;
+    std::string result;
+};
+
+void StartTunExecute(napi_env /*env*/, void* data) {
+    auto* ctx = static_cast<StartTunAsyncData*>(data);
+    if (!EnsureMihomoLoaded()) {
+        ctx->result = g_api.loadError;
+        return;
+    }
+    OH_LOG_INFO(LOG_APP, "StartTunAsync execute: fd=%{public}d, yamlLen=%{public}zu", ctx->tunFd, ctx->yaml.size());
+    ctx->result = ConsumeGoString(g_api.startTun(ctx->tunFd, const_cast<char*>(ctx->yaml.c_str())));
+}
+
+void StartTunComplete(napi_env env, napi_status /*status*/, void* data) {
+    auto* ctx = static_cast<StartTunAsyncData*>(data);
+    napi_value out;
+    napi_create_string_utf8(env, ctx->result.c_str(), ctx->result.size(), &out);
+    napi_resolve_deferred(env, ctx->deferred, out);
+    napi_delete_async_work(env, ctx->work);
+    delete ctx;
+}
+
+napi_value NapiStartTunAsync(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+
+    auto* ctx = new StartTunAsyncData();
+    napi_value promise;
+    napi_create_promise(env, &ctx->deferred, &promise);
+
+    if (argc < 2) {
+        std::string err = "missing tunFd or configYaml";
+        napi_value out;
+        napi_create_string_utf8(env, err.c_str(), err.size(), &out);
+        napi_resolve_deferred(env, ctx->deferred, out);
+        delete ctx;
+        return promise;
+    }
+
+    napi_get_value_int32(env, argv[0], &ctx->tunFd);
+    ctx->yaml = GetStringArg(env, argv[1]);
+
+    napi_value resourceName;
+    napi_create_string_utf8(env, "TizLinkStartTunAsync", NAPI_AUTO_LENGTH, &resourceName);
+    napi_create_async_work(env, nullptr, resourceName, StartTunExecute, StartTunComplete, ctx, &ctx->work);
+    napi_queue_async_work(env, ctx->work);
+    return promise;
 }
 
 napi_value NapiStop(napi_env env, napi_callback_info /*info*/) {
@@ -420,6 +491,7 @@ static napi_value Init(napi_env env, napi_value exports) {
         {"isCoreAvailable", nullptr, NapiIsCoreAvailable, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"setup", nullptr, NapiSetup, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"startTun", nullptr, NapiStartTun, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"startTunAsync", nullptr, NapiStartTunAsync, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"stop", nullptr, NapiStop, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"isRunning", nullptr, NapiIsRunning, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"setLogLevel", nullptr, NapiSetLogLevel, nullptr, nullptr, nullptr, napi_default, nullptr},

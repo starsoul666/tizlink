@@ -1,6 +1,7 @@
 export const isCoreAvailable: () => boolean;
 export const setup: (homeDir: string) => string;
 export const startTun: (tunFd: number, configYaml: string) => string;
+export const startTunAsync: (tunFd: number, configYaml: string) => Promise<string>;
 export const stop: () => void;
 export const isRunning: () => boolean;
 export const setLogLevel: (level: string) => void;

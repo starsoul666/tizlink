@@ -24,8 +24,10 @@ typedef struct { const char *p; ptrdiff_t n; } _GoString_;
 #include <stdlib.h>
 
 typedef int (*protect_fn)(int fd);
+typedef void (*log_fn)(const char* msg);
 
 static protect_fn g_protect_fn = NULL;
+static log_fn g_log_fn = NULL;
 
 static inline void set_protect_func(protect_fn fn) {
     g_protect_fn = fn;
@@ -36,6 +38,16 @@ static inline int call_protect(int fd) {
         return g_protect_fn(fd);
     }
     return 1;
+}
+
+static inline void set_log_func(log_fn fn) {
+    g_log_fn = fn;
+}
+
+static inline void call_log(const char* msg) {
+    if (g_log_fn != NULL && msg != NULL) {
+        g_log_fn(msg);
+    }
 }
 
 #line 1 "cgo-generated-wrapper"
@@ -96,6 +108,7 @@ extern "C" {
 
 extern char* Setup(char* homeDir);
 extern void SetProtectCallback(protect_fn fn);
+extern void SetLogCallback(log_fn fn);
 extern char* StartTun(int tunFd, char* configYaml);
 extern void Stop();
 extern int IsRunning();

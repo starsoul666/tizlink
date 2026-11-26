@@ -4,8 +4,10 @@ package main
 #include <stdlib.h>
 
 typedef int (*protect_fn)(int fd);
+typedef void (*log_fn)(const char* msg);
 
 static protect_fn g_protect_fn = NULL;
+static log_fn g_log_fn = NULL;
 
 static inline void set_protect_func(protect_fn fn) {
     g_protect_fn = fn;
@@ -17,10 +19,21 @@ static inline int call_protect(int fd) {
     }
     return 1;
 }
+
+static inline void set_log_func(log_fn fn) {
+    g_log_fn = fn;
+}
+
+static inline void call_log(const char* msg) {
+    if (g_log_fn != NULL && msg != NULL) {
+        g_log_fn(msg);
+    }
+}
 */
 import "C"
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"net/netip"
@@ -37,6 +50,7 @@ import (
 	"github.com/metacubex/mihomo/component/iface"
 	"github.com/metacubex/mihomo/component/resolver"
 	CConst "github.com/metacubex/mihomo/constant"
+	mdns "github.com/metacubex/mihomo/dns"
 	"github.com/metacubex/mihomo/hub"
 	"github.com/metacubex/mihomo/hub/executor"
 	"github.com/metacubex/mihomo/listener"
@@ -45,9 +59,12 @@ import (
 	"github.com/metacubex/mihomo/tunnel/statistic"
 )
 
+//go:embed cacert.pem
+var embeddedCACerts []byte
+
 var (
-	mu         sync.Mutex
-	running    atomic.Bool
+	mu          sync.Mutex
+	running     atomic.Bool
 	initialized atomic.Bool
 
 	logMu      sync.Mutex
@@ -58,11 +75,15 @@ var (
 
 func appendLog(line string) {
 	logMu.Lock()
-	defer logMu.Unlock()
 	logRing = append(logRing, line)
 	if len(logRing) > maxLogSize {
 		logRing = logRing[len(logRing)-maxLogSize:]
 	}
+	logMu.Unlock()
+
+	cmsg := C.CString(line)
+	C.call_log(cmsg)
+	C.free(unsafe.Pointer(cmsg))
 }
 
 func startLogCollector() {
@@ -106,6 +127,23 @@ func Setup(homeDir *C.char) *C.char {
 		return C.CString(fmt.Sprintf("mkdir homeDir failed: %v", err))
 	}
 
+	// HarmonyOS sandbox blocks /etc/ssl/certs; provide embedded Mozilla CA bundle via SSL_CERT_FILE
+	if len(embeddedCACerts) > 0 {
+		certPath := filepath.Join(dir, "cacert.pem")
+		needWrite := true
+		if st, err := os.Stat(certPath); err == nil && st.Size() == int64(len(embeddedCACerts)) {
+			needWrite = false
+		}
+		if needWrite {
+			if err := os.WriteFile(certPath, embeddedCACerts, 0o644); err != nil {
+				appendLog(fmt.Sprintf("[libmihomo] write cacert.pem failed: %v", err))
+			}
+		}
+		_ = os.Setenv("SSL_CERT_FILE", certPath)
+	}
+
+	mdns.UpdateSystemDNS([]string{"223.5.5.5", "119.29.29.29"})
+
 	CConst.SetHomeDir(dir)
 	CConst.SetConfig(filepath.Join(dir, "config.yaml"))
 	startLogCollector()
@@ -121,6 +159,11 @@ func SetProtectCallback(fn C.protect_fn) {
 	setupProtectHook()
 }
 
+//export SetLogCallback
+func SetLogCallback(fn C.log_fn) {
+	C.set_log_func(fn)
+}
+
 //export StartTun
 func StartTun(tunFd C.int, configYaml *C.char) *C.char {
 	mu.Lock()
@@ -132,6 +175,7 @@ func StartTun(tunFd C.int, configYaml *C.char) *C.char {
 	}
 
 	if running.Load() {
+		listener.Cleanup()
 		executor.Shutdown()
 		running.Store(false)
 	}
@@ -146,6 +190,9 @@ func StartTun(tunFd C.int, configYaml *C.char) *C.char {
 	// Bind HarmonyOS VpnExtensionAbility TUN fd into mihomo sing-tun
 	fd := int(tunFd)
 	if fd > 0 {
+		if nbErr := syscall.SetNonblock(fd, true); nbErr != nil {
+			appendLog(fmt.Sprintf("[libmihomo] SetNonblock(%d) warn: %v", fd, nbErr))
+		}
 		cfg.General.Tun.Enable = true
 		cfg.General.Tun.FileDescriptor = fd
 		cfg.General.Tun.Device = "vpn-tun"
@@ -169,7 +216,8 @@ func StartTun(tunFd C.int, configYaml *C.char) *C.char {
 	statistic.DefaultManager.ResetStatistic()
 	hub.ApplyConfig(cfg)
 	running.Store(true)
-	appendLog(fmt.Sprintf("[libmihomo] StartTun OK (fd=%d, proxies=%d)", fd, len(cfg.Proxies)))
+	tunConf := listener.GetTunConf()
+	appendLog(fmt.Sprintf("[libmihomo] StartTun OK (fd=%d, tunEnable=%v, stack=%s, proxies=%d)", fd, tunConf.Enable, tunConf.Stack.String(), len(cfg.Proxies)))
 	return C.CString("")
 }
 

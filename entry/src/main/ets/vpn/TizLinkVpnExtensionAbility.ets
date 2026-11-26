@@ -64,7 +64,19 @@ export default class TizLinkVpnExtensionAbility extends VpnExtensionAbility {
             prefixLength: 30
           }
         ],
-        dnsAddresses: ['172.19.0.2', '223.5.5.5'],
+        routes: [
+          {
+            interface: 'vpn-tun',
+            destination: {
+              address: { address: '0.0.0.0', family: 1 },
+              prefixLength: 0
+            },
+            gateway: { address: '', family: 1 },
+            hasGateway: true,
+            isDefaultRoute: true
+          }
+        ],
+        dnsAddresses: ['172.19.0.2'],
         mtu: 1500,
         isIPv4Accepted: true,
         isIPv6Accepted: settings.enableIpv6,
@@ -90,7 +102,8 @@ export default class TizLinkVpnExtensionAbility extends VpnExtensionAbility {
 
       this.vpnConnection = vpnExtension.createVpnConnection(this.context);
 
-      // Register socket protection bridge before starting TUN
+      // Register per-socket protection fallback bridge before starting TUN
+      tizlinkNative.setProcessProtected(false);
       tizlinkNative.registerProtectCallback((reqId: number, fd: number) => {
         if (!this.vpnConnection) {
           tizlinkNative.resolveProtect(reqId, false);
@@ -111,7 +124,17 @@ export default class TizLinkVpnExtensionAbility extends VpnExtensionAbility {
         throw new Error(`创建 TUN 接口失败 (fd=${this.tunFd})`);
       }
 
-      const startErr: string = tizlinkNative.startTun(this.tunFd, configYaml);
+      // HarmonyOS API 22+: protect entire VPN process so all outbound sockets bypass VPN natively
+      try {
+        await this.vpnConnection.protectProcessNet();
+        tizlinkNative.setProcessProtected(true);
+        hilog.info(DOMAIN, TAG, 'vpnConnection.protectProcessNet() succeeded');
+      } catch (protectErr) {
+        hilog.warn(DOMAIN, TAG, 'protectProcessNet unavailable, using per-socket protect: %{public}s', JSON.stringify(protectErr));
+      }
+
+      // Start Mihomo asynchronously off the ArkTS main thread to prevent protect(fd) deadlock
+      const startErr: string = await tizlinkNative.startTunAsync(this.tunFd, configYaml);
       if (startErr.length > 0) {
         throw new Error(`Mihomo StartTun 失败: ${startErr}`);
       }
@@ -148,6 +171,7 @@ export default class TizLinkVpnExtensionAbility extends VpnExtensionAbility {
 
     try {
       tizlinkNative.stop();
+      tizlinkNative.setProcessProtected(false);
       tizlinkNative.registerProtectCallback(null);
     } catch (_e) {
       // ignore
