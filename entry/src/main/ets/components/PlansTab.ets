@@ -168,7 +168,7 @@ export struct PlansTab {
             Text(I18n.t('暂无可订阅方案', 'No Plans Available'))
               .fontSize(16)
               .fontColor(Theme.TEXT_PRIMARY)
-            Text(I18n.t('点击右上角“刷新”获取最新套餐列表，或在“节点”页直接导入订阅。', 'Tap Refresh to load plans, or import a subscription in Nodes.'))
+            Text(I18n.t('点击右上角「刷新」获取最新套餐列表', 'Tap Refresh to load available plans'))
               .fontSize(13)
               .fontColor(Theme.TEXT_SECONDARY)
               .textAlign(TextAlign.Center)

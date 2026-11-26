@@ -191,18 +191,12 @@ export struct AccountTab {
             .fill(this.vpnState === 'connected' ? Theme.ACCENT_MINT : Theme.TEXT_SECONDARY)
           Text(
             this.vpnState === 'connected'
-              ? I18n.t('已连接 · Mihomo 安全隧道运行中', 'Connected · Mihomo Tunnel Active')
+              ? I18n.t('已连接', 'Connected')
               : I18n.t('未连接', 'Disconnected')
           )
             .fontSize(14)
             .fontColor(Theme.TEXT_PRIMARY)
           Blank()
-          Text(VpnManager.getInstance().isCoreAvailable() ? 'Core OK' : 'Core')
-            .fontSize(11)
-            .fontColor(Theme.ACCENT_MINT)
-            .padding({ left: 8, right: 8, top: 3, bottom: 3 })
-            .backgroundColor('#162B2E')
-            .borderRadius(6)
         }
         .width('100%')
         .padding(16)
@@ -279,7 +273,7 @@ export struct AccountTab {
               Text('↻')
                 .fontSize(14)
                 .fontColor(Theme.TEXT_SECONDARY)
-              Text(I18n.t(`每月 ${this.subscription.resetDay} 日重置流量`, `Resets on day ${this.subscription.resetDay} monthly`))
+              Text(I18n.t(`流量重置还剩 ${this.subscription.resetDay} 天`, `Traffic resets in ${this.subscription.resetDay} days`))
                 .fontSize(13)
                 .fontColor(Theme.TEXT_SECONDARY)
             }
@@ -323,26 +317,10 @@ export struct AccountTab {
               .fontSize(14)
               .fontColor(Theme.TEXT_SECONDARY)
             Blank()
-            Text(`¥ ${this.subscription.balance.toFixed(2)}`)
+            Text(`${this.subscription.balance}`)
               .fontSize(14)
               .fontWeight(FontWeight.Medium)
               .fontColor(Theme.TEXT_PRIMARY)
-          }
-          .width('100%')
-
-          Divider().color(Theme.BORDER)
-
-          Row() {
-            Text(`📱  ${I18n.t('设备标识', 'Device ID')}`)
-              .fontSize(14)
-              .fontColor(Theme.TEXT_SECONDARY)
-            Blank()
-            Text(this.auth.deviceId)
-              .fontSize(12)
-              .fontColor(Theme.TEXT_MUTED)
-              .onClick(() => {
-                this.copyText(this.auth.deviceId);
-              })
           }
           .width('100%')
         }
