@@ -34,7 +34,6 @@ struct Index {
   @State settings: AppSettings = createDefaultSettings();
   @State auth: AuthSession = {
     loggedIn: false,
-    backendType: 'whmcs',
     email: '',
     token: '',
     authData: '',
@@ -108,64 +107,25 @@ struct Index {
     const storage: StorageService = StorageService.getInstance();
 
     this.refreshingNodes = true;
-    if (this.settings.backendType === 'whmcs') {
-      const syncRes = await api.syncWhmcsSession(this.settings, this.auth);
-      if (syncRes.ok && syncRes.data) {
-        this.subscription = syncRes.data.subscription;
-        await storage.saveSubscription(syncRes.data.subscription);
-        if (syncRes.data.nodes.length > 0) {
-          this.nodes = syncRes.data.nodes;
-          await storage.saveNodes(syncRes.data.nodes);
-        }
-        if (showFeedback) {
-          this.showToast(syncRes.message);
-        }
-      } else if (showFeedback) {
+    const syncRes = await api.syncWhmcsSession(this.settings, this.auth);
+    if (syncRes.ok && syncRes.data) {
+      this.subscription = syncRes.data.subscription;
+      await storage.saveSubscription(syncRes.data.subscription);
+      if (syncRes.data.nodes.length > 0) {
+        this.nodes = syncRes.data.nodes;
+        await storage.saveNodes(syncRes.data.nodes);
+      }
+      if (showFeedback) {
         this.showToast(syncRes.message);
       }
-      this.refreshingNodes = false;
-      void this.loadPlans(false);
-      return;
-    }
-
-    const subRes = await api.fetchSubscriptionInfo(this.settings, this.auth);
-    if (subRes.ok && subRes.data) {
-      this.subscription = subRes.data;
-      await storage.saveSubscription(subRes.data);
-      const url: string = subRes.data.subscribeUrl || this.settings.manualSubscribeUrl;
-      if (url.length > 0) {
-        const nodesRes = await api.downloadAndParseNodes(url);
-        if (nodesRes.ok && nodesRes.data) {
-          this.nodes = nodesRes.data;
-          await storage.saveNodes(nodesRes.data);
-          if (showFeedback) {
-            this.showToast(nodesRes.message);
-          }
-        } else if (showFeedback) {
-          this.showToast(nodesRes.message);
-        }
-      }
-    } else if (this.settings.manualSubscribeUrl.length > 0) {
-      const nodesRes = await api.downloadAndParseNodes(this.settings.manualSubscribeUrl);
-      if (nodesRes.ok && nodesRes.data) {
-        this.nodes = nodesRes.data;
-        await storage.saveNodes(nodesRes.data);
-        if (showFeedback) {
-          this.showToast(nodesRes.message);
-        }
-      }
     } else if (showFeedback) {
-      this.showToast(subRes.message);
+      this.showToast(syncRes.message);
     }
     this.refreshingNodes = false;
-
     void this.loadPlans(false);
   }
 
   private async loadPlans(showFeedback: boolean): Promise<void> {
-    if (this.settings.backendType === 'custom') {
-      return;
-    }
     this.refreshingPlans = true;
     const res = await ApiService.getInstance().fetchPlans(this.settings, this.auth);
     this.refreshingPlans = false;
@@ -328,7 +288,7 @@ struct Index {
     if (subUrl.length > 0) {
       this.subscription.subscribeUrl = subUrl;
     }
-    if (this.settings.backendType === 'whmcs' && this.nodes.length > 0) {
+    if (this.nodes.length > 0) {
       void this.loadPlans(false);
     } else {
       void this.syncAllRemoteData(true);
@@ -631,9 +591,7 @@ struct Index {
         onSettingsChanged: () => {
           // Force UI re-render on language/settings change
           this.settings = {
-            backendType: this.settings.backendType,
             whmcsApiUrl: this.settings.whmcsApiUrl,
-            v2boardApiUrl: this.settings.v2boardApiUrl,
             manualSubscribeUrl: this.settings.manualSubscribeUrl,
             routingMode: this.settings.routingMode,
             relayRegion: this.settings.relayRegion,

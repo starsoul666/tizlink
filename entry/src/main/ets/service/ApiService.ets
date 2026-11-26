@@ -54,21 +54,10 @@ export class ApiService {
     return ApiService.instance;
   }
 
-  private getV2BoardBase(settings: AppSettings): string {
-    const raw: string = settings.v2boardApiUrl.trim().replace(/\/+$/, '');
-    if (raw.length === 0) {
-      return '';
-    }
-    if (raw.endsWith('/api/v1')) {
-      return raw;
-    }
-    return `${raw}/api/v1`;
-  }
-
   private formatHttpError(err: Object, url: string): string {
     const raw: string = err instanceof Error ? err.message : JSON.stringify(err);
     if (raw.includes('2300006')) {
-      return `域名/主机解析失败 (2300006): 无法访问 ${url}。请确认：(1) 未使用 DevEco Previewer（预览器无法联网，请用真机或已联网模拟器）；(2) 设备网络正常且未开启异常系统代理。`;
+      return `域名/主机解析失败 (2300006): 无法访问 ${url}。请确认 API 地址拼写正确且设备网络正常。`;
     }
     if (raw.includes('2300007')) {
       return `连接服务器失败 (2300007): 请检查设备网络连接或服务器地址。`;
@@ -230,20 +219,6 @@ export class ApiService {
     return res;
   }
 
-  private v2Headers(auth?: AuthSession): Record<string, string> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-      'User-Agent': `AegisClient/${APP_VERSION} (HarmonyOS)`
-    };
-    if (auth && auth.authData.length > 0) {
-      headers['Authorization'] = auth.authData;
-    } else if (auth && auth.token.length > 0) {
-      headers['Authorization'] = auth.token;
-    }
-    return headers;
-  }
-
   private parseTimestamp(raw: Object | undefined): number {
     if (raw === undefined || raw === null) {
       return 0;
@@ -263,7 +238,7 @@ export class ApiService {
     return Number.isNaN(ms) ? 0 : Math.floor(ms / 1000);
   }
 
-  private parsePositivePrice(raw: Object | undefined, scale: number = 1.0): number {
+  private parsePositivePrice(raw: Object | undefined): number {
     if (raw === undefined || raw === null) {
       return 0;
     }
@@ -271,7 +246,7 @@ export class ApiService {
     if (Number.isNaN(n) || n < 0) {
       return 0;
     }
-    return n / scale;
+    return n;
   }
 
   private parseWhmcsLoginData(root: JsonMap, fallbackEmail: string): WhmcsSyncBundle {
@@ -345,7 +320,6 @@ export class ApiService {
     const port: number = Number(n['client_port'] ?? n['port'] ?? 443) || 443;
     const lastOnline: number = Number(n['last_online'] ?? 1) || 0;
 
-    // Skip informational banner entries (e.g. "官网：tizlink.com" with last_online=0)
     if (server.length === 0 || (lastOnline === 0 && (rawName.includes('官网') || rawName.includes('通知')))) {
       return null;
     }
@@ -471,58 +445,28 @@ export class ApiService {
     password: string,
     deviceId: string
   ): Promise<ApiResult<LoginPayload>> {
-    if (settings.backendType === 'whmcs') {
-      const res = await this.whmcsCall(settings, 'login', {
-        'X-User-Email': email,
-        'X-User-Password': password
-      }, {
-        'device_id': deviceId
-      });
-      if (!res.ok || !res.data) {
-        return { ok: false, message: res.message };
-      }
-      const token: string = String(res.data['token'] ?? `whmcs:${email}`);
-      const bundle: WhmcsSyncBundle = this.parseWhmcsLoginData(res.data, email);
-      return {
-        ok: true,
-        message: `登录成功，已获取 ${bundle.nodes.length} 个节点`,
-        data: {
-          token: token,
-          authData: token,
-          email: bundle.subscription.email || email,
-          subscribeUrl: bundle.subscription.subscribeUrl,
-          subscription: bundle.subscription,
-          nodes: bundle.nodes,
-          inviteSummary: bundle.inviteSummary
-        }
-      };
-    }
-
-    const base: string = this.getV2BoardBase(settings);
-    if (base.length === 0) {
-      return { ok: false, message: '请先在服务器设置中填写 V2Board 后端域名' };
-    }
-    const res = await this.requestJson(
-      `${base}/passport/auth/login`,
-      http.RequestMethod.POST,
-      this.v2Headers(),
-      JSON.stringify({ email: email, password: password })
-    );
+    const res = await this.whmcsCall(settings, 'login', {
+      'X-User-Email': email,
+      'X-User-Password': password
+    }, {
+      'device_id': deviceId
+    });
     if (!res.ok || !res.data) {
       return { ok: false, message: res.message };
     }
-    const d = res.data['data'] as JsonMap | undefined;
-    if (!d) {
-      return { ok: false, message: String(res.data['message'] ?? '登录失败') };
-    }
+    const token: string = String(res.data['token'] ?? `whmcs:${email}`);
+    const bundle: WhmcsSyncBundle = this.parseWhmcsLoginData(res.data, email);
     return {
       ok: true,
-      message: '登录成功',
+      message: `登录成功，已获取 ${bundle.nodes.length} 个节点`,
       data: {
-        token: String(d['token'] ?? ''),
-        authData: String(d['auth_data'] ?? d['token'] ?? ''),
-        email: email,
-        subscribeUrl: ''
+        token: token,
+        authData: token,
+        email: bundle.subscription.email || email,
+        subscribeUrl: bundle.subscription.subscribeUrl,
+        subscription: bundle.subscription,
+        nodes: bundle.nodes,
+        inviteSummary: bundle.inviteSummary
       }
     };
   }
@@ -549,127 +493,54 @@ export class ApiService {
     };
   }
 
-  async sendEmailVerify(settings: AppSettings, email: string): Promise<ApiResult<boolean>> {
-    if (settings.backendType === 'whmcs') {
-      return { ok: true, message: 'TizLink 线路无需邮箱验证码，可直接提交', data: true };
-    }
-    const base: string = this.getV2BoardBase(settings);
-    if (base.length === 0) {
-      return { ok: false, message: '未配置后端地址' };
-    }
-    const res = await this.requestJson(
-      `${base}/passport/comm/sendEmailVerify`,
-      http.RequestMethod.POST,
-      this.v2Headers(),
-      JSON.stringify({ email: email })
-    );
-    return { ok: res.ok, message: res.ok ? '验证码已发送' : res.message, data: res.ok };
-  }
-
   async register(
     settings: AppSettings,
     email: string,
     password: string,
-    emailCode: string,
     inviteCode: string
   ): Promise<ApiResult<LoginPayload>> {
-    if (settings.backendType === 'whmcs') {
-      const prefix: string = email.split('@')[0] || 'User';
-      const form: Record<string, string> = {};
-      if (inviteCode.length > 0) {
-        form['invite_code'] = inviteCode;
-      }
-      const res = await this.whmcsCall(settings, 'signup', {
-        'X-User-Email': email,
-        'X-User-Password': password,
-        'X-User-Firstname': prefix,
-        'X-User-Lastname': 'TizLink'
-      }, form);
-      if (!res.ok || !res.data) {
-        return { ok: false, message: res.message };
-      }
-      const token: string = String(res.data['token'] ?? `whmcs:${email}`);
-      const bundle: WhmcsSyncBundle = this.parseWhmcsLoginData(res.data, email);
-      return {
-        ok: true,
-        message: '注册成功',
-        data: {
-          token: token,
-          authData: token,
-          email: email,
-          subscribeUrl: bundle.subscription.subscribeUrl,
-          subscription: bundle.subscription,
-          nodes: bundle.nodes,
-          inviteSummary: bundle.inviteSummary
-        }
-      };
-    }
-
-    const base: string = this.getV2BoardBase(settings);
-    if (base.length === 0) {
-      return { ok: false, message: '未配置后端地址' };
-    }
-    const payload: Record<string, string> = {
-      'email': email,
-      'password': password
-    };
-    if (emailCode.length > 0) {
-      payload['email_code'] = emailCode;
-    }
+    const prefix: string = email.split('@')[0] || 'User';
+    const form: Record<string, string> = {};
     if (inviteCode.length > 0) {
-      payload['invite_code'] = inviteCode;
+      form['invite_code'] = inviteCode;
     }
-    const res = await this.requestJson(
-      `${base}/passport/auth/register`,
-      http.RequestMethod.POST,
-      this.v2Headers(),
-      JSON.stringify(payload)
-    );
+    const res = await this.whmcsCall(settings, 'signup', {
+      'X-User-Email': email,
+      'X-User-Password': password,
+      'X-User-Firstname': prefix,
+      'X-User-Lastname': 'TizLink'
+    }, form);
     if (!res.ok || !res.data) {
       return { ok: false, message: res.message };
     }
-    const d = res.data['data'] as JsonMap | undefined;
-    if (!d) {
-      return { ok: false, message: String(res.data['message'] ?? '注册失败') };
-    }
+    const token: string = String(res.data['token'] ?? `whmcs:${email}`);
+    const bundle: WhmcsSyncBundle = this.parseWhmcsLoginData(res.data, email);
     return {
       ok: true,
       message: '注册成功',
       data: {
-        token: String(d['token'] ?? ''),
-        authData: String(d['auth_data'] ?? d['token'] ?? ''),
+        token: token,
+        authData: token,
         email: email,
-        subscribeUrl: ''
+        subscribeUrl: bundle.subscription.subscribeUrl,
+        subscription: bundle.subscription,
+        nodes: bundle.nodes,
+        inviteSummary: bundle.inviteSummary
       }
     };
   }
 
   async resetPassword(
     settings: AppSettings,
-    email: string,
-    emailCode: string,
-    newPassword: string
+    email: string
   ): Promise<ApiResult<boolean>> {
-    if (settings.backendType === 'whmcs') {
-      const res = await this.whmcsCall(settings, 'resetpassword', {
-        'X-User-Email': email
-      });
-      const msg: string = res.ok
-        ? String(res.data?.['message'] ?? '重置密码邮件已发送至您的邮箱')
-        : res.message;
-      return { ok: res.ok, message: msg, data: res.ok };
-    }
-    const base: string = this.getV2BoardBase(settings);
-    if (base.length === 0) {
-      return { ok: false, message: '未配置后端地址' };
-    }
-    const res = await this.requestJson(
-      `${base}/passport/auth/forget`,
-      http.RequestMethod.POST,
-      this.v2Headers(),
-      JSON.stringify({ email: email, email_code: emailCode, password: newPassword })
-    );
-    return { ok: res.ok, message: res.ok ? '密码重置成功' : res.message, data: res.ok };
+    const res = await this.whmcsCall(settings, 'resetpassword', {
+      'X-User-Email': email
+    });
+    const msg: string = res.ok
+      ? String(res.data?.['message'] ?? '重置密码邮件已发送至您的邮箱')
+      : res.message;
+    return { ok: res.ok, message: msg, data: res.ok };
   }
 
   async changePassword(
@@ -678,83 +549,18 @@ export class ApiService {
     oldPassword: string,
     newPassword: string
   ): Promise<ApiResult<boolean>> {
-    if (settings.backendType === 'whmcs') {
-      const res = await this.whmcsCall(settings, 'changepassword', {
-        'X-User-Email': auth.email,
-        'X-User-Password': oldPassword,
-        'X-User-Token': auth.token
-      }, {
-        'new_password': newPassword,
-        'newpassword': newPassword
-      });
-      return { ok: res.ok, message: res.ok ? '密码修改成功' : res.message, data: res.ok };
-    }
-    const base: string = this.getV2BoardBase(settings);
-    const res = await this.requestJson(
-      `${base}/user/changePassword`,
-      http.RequestMethod.POST,
-      this.v2Headers(auth),
-      JSON.stringify({ old_password: oldPassword, new_password: newPassword })
-    );
+    const res = await this.whmcsCall(settings, 'changepassword', {
+      'X-User-Email': auth.email,
+      'X-User-Password': oldPassword,
+      'X-User-Token': auth.token
+    }, {
+      'new_password': newPassword,
+      'newpassword': newPassword
+    });
     return { ok: res.ok, message: res.ok ? '密码修改成功' : res.message, data: res.ok };
   }
 
-  // ==================== SUBSCRIPTION & NODES ====================
-
-  async fetchSubscriptionInfo(
-    settings: AppSettings,
-    auth: AuthSession
-  ): Promise<ApiResult<SubscriptionInfo>> {
-    if (settings.backendType === 'custom') {
-      const info: SubscriptionInfo = createEmptySubscription();
-      info.planName = '自定义订阅';
-      info.subscribeUrl = settings.manualSubscribeUrl;
-      info.email = auth.email || '本地订阅用户';
-      return { ok: true, message: 'OK', data: info };
-    }
-
-    if (settings.backendType === 'whmcs') {
-      const syncRes = await this.syncWhmcsSession(settings, auth);
-      if (!syncRes.ok || !syncRes.data) {
-        return { ok: false, message: syncRes.message };
-      }
-      return { ok: true, message: 'OK', data: syncRes.data.subscription };
-    }
-
-    const base: string = this.getV2BoardBase(settings);
-    const subRes = await this.requestJson(
-      `${base}/user/getSubscribe`,
-      http.RequestMethod.GET,
-      this.v2Headers(auth)
-    );
-    if (!subRes.ok || !subRes.data) {
-      return { ok: false, message: subRes.message };
-    }
-    const d = (subRes.data['data'] as JsonMap | undefined) ?? {};
-    const planObj = d['plan'] as JsonMap | undefined;
-    const info: SubscriptionInfo = createEmptySubscription();
-    info.planName = String(planObj?.['name'] ?? d['plan_name'] ?? '无有效套餐');
-    info.subscribeUrl = String(d['subscribe_url'] ?? '');
-    info.expiredAt = this.parseTimestamp(d['expired_at']);
-    info.transferEnable = Number(d['transfer_enable'] ?? 0) || 0;
-    info.usedUpload = Number(d['u'] ?? 0) || 0;
-    info.usedDownload = Number(d['d'] ?? 0) || 0;
-    info.resetDay = Number(d['reset_day'] ?? 0) || 0;
-    info.email = String(d['email'] ?? auth.email);
-    info.uuid = String(d['uuid'] ?? '');
-
-    const userRes = await this.requestJson(`${base}/user/info`, http.RequestMethod.GET, this.v2Headers(auth));
-    if (userRes.ok && userRes.data) {
-      const ud = userRes.data['data'] as JsonMap | undefined;
-      if (ud) {
-        info.balance = (Number(ud['balance'] ?? 0) || 0) / 100.0;
-        if (ud['email']) {
-          info.email = String(ud['email']);
-        }
-      }
-    }
-    return { ok: true, message: 'OK', data: info };
-  }
+  // ==================== SUBSCRIPTION DOWNLOAD ====================
 
   async downloadAndParseNodes(subscribeUrl: string): Promise<ApiResult<ProxyNode[]>> {
     const cleanUrl: string = subscribeUrl.trim();
@@ -779,37 +585,18 @@ export class ApiService {
   // ==================== PLANS, ORDERS & PAYMENTS ====================
 
   async fetchPlans(settings: AppSettings, auth: AuthSession): Promise<ApiResult<PlanItem[]>> {
-    if (settings.backendType === 'custom') {
-      return { ok: true, message: 'OK', data: [] };
+    const res = await this.whmcsCall(settings, 'getproducts', {
+      'X-User-Email': auth.email,
+      'X-User-Password': auth.savedPassword,
+      'X-User-Token': auth.token
+    });
+    if (!res.ok || !res.data) {
+      return { ok: false, message: res.message };
     }
-    let rawList: Object[] = [];
-    if (settings.backendType === 'whmcs') {
-      const res = await this.whmcsCall(settings, 'getproducts', {
-        'X-User-Email': auth.email,
-        'X-User-Password': auth.savedPassword,
-        'X-User-Token': auth.token
-      });
-      if (!res.ok || !res.data) {
-        return { ok: false, message: res.message };
-      }
-      const d = res.data['products'] ?? res.data['data'];
-      if (Array.isArray(d)) {
-        rawList = d as Object[];
-      }
-    } else {
-      const base: string = this.getV2BoardBase(settings);
-      const res = await this.requestJson(`${base}/user/plan/fetch`, http.RequestMethod.GET, this.v2Headers(auth));
-      if (!res.ok || !res.data) {
-        return { ok: false, message: res.message };
-      }
-      const d = res.data['data'];
-      if (Array.isArray(d)) {
-        rawList = d as Object[];
-      }
-    }
+    const d = res.data['products'] ?? res.data['data'];
+    const rawList: Object[] = Array.isArray(d) ? (d as Object[]) : [];
 
     const plans: PlanItem[] = [];
-    const scale: number = settings.backendType === 'v2board' ? 100.0 : 1.0;
     for (const item of rawList) {
       const m = item as JsonMap;
       const pricingObj = m['pricing'] as JsonMap | undefined;
@@ -831,47 +618,28 @@ export class ApiService {
         name: nameStr,
         content: cleanDesc,
         transferEnableGb: gb,
-        monthPrice: this.parsePositivePrice(cnyObj ? cnyObj['monthly'] : (m['month_price'] ?? m['monthly']), scale),
-        quarterPrice: this.parsePositivePrice(cnyObj ? cnyObj['quarterly'] : (m['quarter_price'] ?? m['quarterly']), scale),
-        halfYearPrice: this.parsePositivePrice(cnyObj ? cnyObj['semiannually'] : (m['half_year_price'] ?? m['semiannually']), scale),
-        yearPrice: this.parsePositivePrice(cnyObj ? cnyObj['annually'] : (m['year_price'] ?? m['annually']), scale),
-        onetimePrice: this.parsePositivePrice(m['onetime_price'], scale),
-        resetPrice: this.parsePositivePrice(m['reset_price'], scale)
+        monthPrice: this.parsePositivePrice(cnyObj ? cnyObj['monthly'] : (m['month_price'] ?? m['monthly'])),
+        quarterPrice: this.parsePositivePrice(cnyObj ? cnyObj['quarterly'] : (m['quarter_price'] ?? m['quarterly'])),
+        halfYearPrice: this.parsePositivePrice(cnyObj ? cnyObj['semiannually'] : (m['half_year_price'] ?? m['semiannually'])),
+        yearPrice: this.parsePositivePrice(cnyObj ? cnyObj['annually'] : (m['year_price'] ?? m['annually'])),
+        onetimePrice: this.parsePositivePrice(m['onetime_price']),
+        resetPrice: this.parsePositivePrice(m['reset_price'])
       });
     }
     return { ok: true, message: 'OK', data: plans };
   }
 
   async fetchPaymentMethods(settings: AppSettings, auth: AuthSession): Promise<ApiResult<PaymentMethod[]>> {
-    let rawList: Object[] = [];
-    if (settings.backendType === 'whmcs') {
-      const res = await this.whmcsCall(settings, 'getpaymentmethods', {
-        'X-User-Email': auth.email,
-        'X-User-Password': auth.savedPassword,
-        'X-User-Token': auth.token
-      });
-      if (!res.ok || !res.data) {
-        return { ok: false, message: res.message };
-      }
-      const d = res.data['payment_methods'] ?? res.data['data'] ?? res.data['methods'];
-      if (Array.isArray(d)) {
-        rawList = d as Object[];
-      }
-    } else {
-      const base: string = this.getV2BoardBase(settings);
-      const res = await this.requestJson(
-        `${base}/user/order/getPaymentMethod`,
-        http.RequestMethod.GET,
-        this.v2Headers(auth)
-      );
-      if (!res.ok || !res.data) {
-        return { ok: false, message: res.message };
-      }
-      const d = res.data['data'];
-      if (Array.isArray(d)) {
-        rawList = d as Object[];
-      }
+    const res = await this.whmcsCall(settings, 'getpaymentmethods', {
+      'X-User-Email': auth.email,
+      'X-User-Password': auth.savedPassword,
+      'X-User-Token': auth.token
+    });
+    if (!res.ok || !res.data) {
+      return { ok: false, message: res.message };
     }
+    const d = res.data['payment_methods'] ?? res.data['data'] ?? res.data['methods'];
+    const rawList: Object[] = Array.isArray(d) ? (d as Object[]) : [];
 
     const methods: PaymentMethod[] = [];
     for (const item of rawList) {
@@ -906,53 +674,29 @@ export class ApiService {
     couponCode: string,
     paymentMethodId: string = ''
   ): Promise<ApiResult<string>> {
-    if (settings.backendType === 'whmcs') {
-      const params: Record<string, string> = {
-        'pid': String(planId),
-        'billingcycle': this.mapPeriodToWhmcsCycle(period)
-      };
-      if (paymentMethodId.length > 0) {
-        params['paymentmethod'] = paymentMethodId;
-      }
-      if (couponCode.trim().length > 0) {
-        params['promocode'] = couponCode.trim();
-      }
-      const res = await this.whmcsCall(settings, 'createorder', {
-        'X-User-Email': auth.email,
-        'X-User-Password': auth.savedPassword,
-        'X-User-Token': auth.token
-      }, params);
-      if (!res.ok || !res.data) {
-        return { ok: false, message: res.message };
-      }
-      const d = (res.data['data'] as JsonMap | undefined) ?? res.data;
-      const tradeNo: string = String(d['invoice_id'] ?? d['invoiceid'] ?? d['trade_no'] ?? d['order_id'] ?? '');
-      return tradeNo.length > 0
-        ? { ok: true, message: '订单已创建', data: tradeNo }
-        : { ok: false, message: '未返回订单号' };
-    }
-
-    const base: string = this.getV2BoardBase(settings);
-    const body: Record<string, Object> = {
-      'plan_id': planId,
-      'period': period
+    const params: Record<string, string> = {
+      'pid': String(planId),
+      'billingcycle': this.mapPeriodToWhmcsCycle(period)
     };
-    if (couponCode.trim().length > 0) {
-      body['coupon_code'] = couponCode.trim();
+    if (paymentMethodId.length > 0) {
+      params['paymentmethod'] = paymentMethodId;
     }
-    const res = await this.requestJson(
-      `${base}/user/order/save`,
-      http.RequestMethod.POST,
-      this.v2Headers(auth),
-      JSON.stringify(body)
-    );
+    if (couponCode.trim().length > 0) {
+      params['promocode'] = couponCode.trim();
+    }
+    const res = await this.whmcsCall(settings, 'createorder', {
+      'X-User-Email': auth.email,
+      'X-User-Password': auth.savedPassword,
+      'X-User-Token': auth.token
+    }, params);
     if (!res.ok || !res.data) {
       return { ok: false, message: res.message };
     }
-    const tradeNo: string = String(res.data['data'] ?? '');
+    const d = (res.data['data'] as JsonMap | undefined) ?? res.data;
+    const tradeNo: string = String(d['invoice_id'] ?? d['invoiceid'] ?? d['trade_no'] ?? d['order_id'] ?? '');
     return tradeNo.length > 0
       ? { ok: true, message: '订单已创建', data: tradeNo }
-      : { ok: false, message: String(res.data['message'] ?? '创建订单失败') };
+      : { ok: false, message: '未返回订单号' };
   }
 
   async checkoutOrder(
@@ -961,76 +705,38 @@ export class ApiService {
     tradeNo: string,
     methodId: string
   ): Promise<ApiResult<CheckoutResult>> {
-    if (settings.backendType === 'whmcs') {
-      const res = await this.whmcsCall(settings, 'checkorder', {
-        'X-User-Email': auth.email,
-        'X-User-Password': auth.savedPassword,
-        'X-User-Token': auth.token
-      }, {
-        'invoice_id': tradeNo,
-        'paymentmethod': methodId
-      });
-      if (!res.ok || !res.data) {
-        return { ok: false, message: res.message };
-      }
-      const d = (res.data['data'] as JsonMap | undefined) ?? res.data;
-      const payUrl: string = String(d['invoice_url'] ?? d['payment_url'] ?? d['pay_url'] ?? d['url'] ?? '');
-      const paid: boolean = d['paid'] === true || String(d['status']) === 'Paid';
-      return { ok: true, message: 'OK', data: { type: paid ? -1 : 1, paymentUrl: payUrl, paid: paid } };
-    }
-
-    const base: string = this.getV2BoardBase(settings);
-    const res = await this.requestJson(
-      `${base}/user/order/checkout`,
-      http.RequestMethod.POST,
-      this.v2Headers(auth),
-      JSON.stringify({ trade_no: tradeNo, method: methodId })
-    );
+    const res = await this.whmcsCall(settings, 'checkorder', {
+      'X-User-Email': auth.email,
+      'X-User-Password': auth.savedPassword,
+      'X-User-Token': auth.token
+    }, {
+      'invoice_id': tradeNo,
+      'paymentmethod': methodId
+    });
     if (!res.ok || !res.data) {
       return { ok: false, message: res.message };
     }
-    const typeVal: number = Number(res.data['type'] ?? 1);
-    const dataVal = res.data['data'];
-    const paid: boolean = typeVal === -1 || dataVal === true;
-    const payUrl: string = typeof dataVal === 'string' ? dataVal : '';
-    return { ok: true, message: 'OK', data: { type: typeVal, paymentUrl: payUrl, paid: paid } };
+    const d = (res.data['data'] as JsonMap | undefined) ?? res.data;
+    const payUrl: string = String(d['invoice_url'] ?? d['payment_url'] ?? d['pay_url'] ?? d['url'] ?? '');
+    const paid: boolean = d['paid'] === true || String(d['status']) === 'Paid';
+    return { ok: true, message: 'OK', data: { type: paid ? -1 : 1, paymentUrl: payUrl, paid: paid } };
   }
 
   async fetchOrders(settings: AppSettings, auth: AuthSession): Promise<ApiResult<OrderItem[]>> {
-    if (settings.backendType === 'custom') {
-      return { ok: true, message: 'OK', data: [] };
+    const res = await this.whmcsCall(settings, 'getorders', {
+      'X-User-Email': auth.email,
+      'X-User-Password': auth.savedPassword,
+      'X-User-Token': auth.token
+    });
+    if (!res.ok || !res.data) {
+      return { ok: false, message: res.message };
     }
-    let rawList: Object[] = [];
-    if (settings.backendType === 'whmcs') {
-      const res = await this.whmcsCall(settings, 'getorders', {
-        'X-User-Email': auth.email,
-        'X-User-Password': auth.savedPassword,
-        'X-User-Token': auth.token
-      });
-      if (!res.ok || !res.data) {
-        return { ok: false, message: res.message };
-      }
-      const d = res.data['orders'] ?? res.data['data'];
-      if (Array.isArray(d)) {
-        rawList = d as Object[];
-      }
-    } else {
-      const base: string = this.getV2BoardBase(settings);
-      const res = await this.requestJson(`${base}/user/order/fetch`, http.RequestMethod.GET, this.v2Headers(auth));
-      if (!res.ok || !res.data) {
-        return { ok: false, message: res.message };
-      }
-      const d = res.data['data'];
-      if (Array.isArray(d)) {
-        rawList = d as Object[];
-      }
-    }
+    const d = res.data['orders'] ?? res.data['data'];
+    const rawList: Object[] = Array.isArray(d) ? (d as Object[]) : [];
 
     const orders: OrderItem[] = [];
-    const scale: number = settings.backendType === 'v2board' ? 100.0 : 1.0;
     for (const item of rawList) {
       const m = item as JsonMap;
-      const planObj = m['plan'] as JsonMap | undefined;
       const productsArr = m['products'];
       let whmcsPlanName: string = '';
       let whmcsPeriod: string = '';
@@ -1053,9 +759,9 @@ export class ApiService {
       }
       orders.push({
         tradeNo: String(m['order_num'] ?? m['trade_no'] ?? m['invoice_id'] ?? m['order_id'] ?? m['id'] ?? ''),
-        planName: whmcsPlanName || String(planObj?.['name'] ?? m['plan_name'] ?? '订阅订单'),
+        planName: whmcsPlanName || String(m['plan_name'] ?? '订阅订单'),
         period: whmcsPeriod || String(m['period'] ?? m['billingcycle'] ?? 'monthly'),
-        totalAmount: (Number(m['total_amount'] ?? m['amount'] ?? m['total'] ?? 0) || 0) / scale,
+        totalAmount: Number(m['total_amount'] ?? m['amount'] ?? m['total'] ?? 0) || 0,
         status: statusNum,
         createdAt: this.parseTimestamp(m['created_at'] ?? m['date']),
         paymentUrl: String(m['invoice_url'] ?? m['payment_url'] ?? '')
@@ -1064,102 +770,44 @@ export class ApiService {
     return { ok: true, message: 'OK', data: orders };
   }
 
-  async cancelOrder(settings: AppSettings, auth: AuthSession, tradeNo: string): Promise<ApiResult<boolean>> {
-    if (settings.backendType === 'v2board') {
-      const base: string = this.getV2BoardBase(settings);
-      const res = await this.requestJson(
-        `${base}/user/order/cancel`,
-        http.RequestMethod.POST,
-        this.v2Headers(auth),
-        JSON.stringify({ trade_no: tradeNo })
-      );
-      return { ok: res.ok, message: res.ok ? '订单已取消' : res.message, data: res.ok };
-    }
-    return { ok: false, message: '当前后端不支持客户端直接取消订单' };
+  async cancelOrder(_settings: AppSettings, _auth: AuthSession, _tradeNo: string): Promise<ApiResult<boolean>> {
+    return { ok: false, message: '请在官网个人中心管理待支付账单' };
   }
 
   // ==================== INVITE & NOTICES ====================
 
-  async fetchInviteSummary(settings: AppSettings, auth: AuthSession): Promise<ApiResult<InviteSummary>> {
-    if (settings.backendType === 'whmcs' && this.cachedWhmcsInvite) {
+  async fetchInviteSummary(_settings: AppSettings, _auth: AuthSession): Promise<ApiResult<InviteSummary>> {
+    if (this.cachedWhmcsInvite) {
       return { ok: true, message: 'OK', data: this.cachedWhmcsInvite };
     }
-    const empty: InviteSummary = {
-      codes: [],
-      registeredCount: 0,
-      commissionRate: 0,
-      commissionBalance: 0,
-      pendingCommission: 0
-    };
-    if (settings.backendType !== 'v2board') {
-      return { ok: true, message: 'OK', data: empty };
-    }
-
-    const base: string = this.getV2BoardBase(settings);
-    const res = await this.requestJson(`${base}/user/invite/fetch`, http.RequestMethod.GET, this.v2Headers(auth));
-    if (!res.ok || !res.data) {
-      return { ok: false, message: res.message };
-    }
-    const d = (res.data['data'] as JsonMap | undefined) ?? {};
-    const codesRaw = d['codes'];
-    if (Array.isArray(codesRaw)) {
-      for (const c of codesRaw as Object[]) {
-        const cm = c as JsonMap;
-        empty.codes.push({
-          code: String(cm['code'] ?? ''),
-          status: Number(cm['status'] ?? 0) || 0,
-          createdAt: this.parseTimestamp(cm['created_at'])
-        });
+    return {
+      ok: true,
+      message: 'OK',
+      data: {
+        codes: [],
+        registeredCount: 0,
+        commissionRate: 0,
+        commissionBalance: 0,
+        pendingCommission: 0
       }
-    }
-    const stat = d['stat'];
-    if (Array.isArray(stat) && stat.length >= 4) {
-      empty.registeredCount = Number(stat[0] ?? 0) || 0;
-      empty.commissionBalance = (Number(stat[1] ?? 0) || 0) / 100.0;
-      empty.pendingCommission = (Number(stat[2] ?? 0) || 0) / 100.0;
-      empty.commissionRate = Number(stat[3] ?? 0) || 0;
-    }
-    return { ok: true, message: 'OK', data: empty };
+    };
   }
 
-  async generateInviteCode(settings: AppSettings, auth: AuthSession): Promise<ApiResult<boolean>> {
-    if (settings.backendType !== 'v2board') {
-      return { ok: false, message: '当前线路请在官网管理邀请码' };
-    }
-    const base: string = this.getV2BoardBase(settings);
-    const res = await this.requestJson(`${base}/user/invite/save`, http.RequestMethod.GET, this.v2Headers(auth));
-    return { ok: res.ok, message: res.ok ? '邀请码已生成' : res.message, data: res.ok };
+  async generateInviteCode(_settings: AppSettings, _auth: AuthSession): Promise<ApiResult<boolean>> {
+    return { ok: false, message: 'TizLink 推广邀请码由账户自动分配' };
   }
 
   async fetchNotices(settings: AppSettings, auth: AuthSession): Promise<ApiResult<NoticeItem[]>> {
-    if (settings.backendType === 'custom') {
-      return { ok: true, message: 'OK', data: [] };
+    const res = await this.whmcsCall(settings, 'getannouncements', {
+      'X-User-Email': auth.email,
+      'X-User-Password': auth.savedPassword,
+      'X-User-Token': auth.token
+    });
+    if (!res.ok || !res.data) {
+      return { ok: false, message: res.message };
     }
-    let rawList: Object[] = [];
-    if (settings.backendType === 'whmcs') {
-      const res = await this.whmcsCall(settings, 'getannouncements', {
-        'X-User-Email': auth.email,
-        'X-User-Password': auth.savedPassword,
-        'X-User-Token': auth.token
-      });
-      if (!res.ok || !res.data) {
-        return { ok: false, message: res.message };
-      }
-      const d = res.data['announcements'] ?? res.data['data'];
-      if (Array.isArray(d)) {
-        rawList = d as Object[];
-      }
-    } else {
-      const base: string = this.getV2BoardBase(settings);
-      const res = await this.requestJson(`${base}/user/notice/fetch`, http.RequestMethod.GET, this.v2Headers(auth));
-      if (!res.ok || !res.data) {
-        return { ok: false, message: res.message };
-      }
-      const d = res.data['data'];
-      if (Array.isArray(d)) {
-        rawList = d as Object[];
-      }
-    }
+    const d = res.data['announcements'] ?? res.data['data'];
+    const rawList: Object[] = Array.isArray(d) ? (d as Object[]) : [];
 
     const notices: NoticeItem[] = [];
     for (const item of rawList) {

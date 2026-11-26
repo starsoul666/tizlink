@@ -116,7 +116,6 @@ export class StorageService {
     }
     return {
       loggedIn: false,
-      backendType: 'whmcs',
       email: '',
       token: '',
       authData: '',
@@ -133,7 +132,6 @@ export class StorageService {
     const prev: AuthSession = await this.loadAuth();
     const cleared: AuthSession = {
       loggedIn: false,
-      backendType: prev.backendType,
       email: prev.email,
       token: '',
       authData: '',
@@ -156,9 +154,7 @@ export class StorageService {
         ? defaults.whmcsApiUrl
         : (rawWhmcsUrl.length > 0 ? rawWhmcsUrl : defaults.whmcsApiUrl);
       return {
-        backendType: saved.backendType ?? defaults.backendType,
         whmcsApiUrl: fixedWhmcsUrl,
-        v2boardApiUrl: saved.v2boardApiUrl ?? defaults.v2boardApiUrl,
         manualSubscribeUrl: saved.manualSubscribeUrl ?? defaults.manualSubscribeUrl,
         routingMode: saved.routingMode ?? defaults.routingMode,
         relayRegion: saved.relayRegion ?? defaults.relayRegion,

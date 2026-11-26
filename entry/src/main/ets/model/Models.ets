@@ -1,4 +1,3 @@
-export type BackendType = 'whmcs' | 'v2board' | 'custom';
 export type RoutingMode = 'rule' | 'global';
 export type RelayRegion = 'auto' | 'cn' | 'global';
 export type SplitTunnelMode = 'bypass' | 'only';
@@ -98,9 +97,7 @@ export interface TrafficStats {
 }
 
 export interface AppSettings {
-  backendType: BackendType;
   whmcsApiUrl: string;
-  v2boardApiUrl: string;
   manualSubscribeUrl: string;
   routingMode: RoutingMode;
   relayRegion: RelayRegion;
@@ -120,7 +117,6 @@ export interface AppSettings {
 
 export interface AuthSession {
   loggedIn: boolean;
-  backendType: BackendType;
   email: string;
   token: string;
   authData: string;
@@ -141,9 +137,7 @@ export const APP_VERSION: string = '2.0.20';
 
 export function createDefaultSettings(): AppSettings {
   return {
-    backendType: 'whmcs',
     whmcsApiUrl: DEFAULT_WHMCS_API_URL,
-    v2boardApiUrl: '',
     manualSubscribeUrl: '',
     routingMode: 'rule',
     relayRegion: 'auto',

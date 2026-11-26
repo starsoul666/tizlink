@@ -77,7 +77,7 @@ export struct PlansTab {
     this.selectedPeriodKey = periods.length > 0 ? periods[0].key : 'month_price';
     this.couponCode = '';
 
-    if (this.settings && this.auth && this.settings.backendType !== 'custom') {
+    if (this.settings && this.auth) {
       const res = await ApiService.getInstance().fetchPaymentMethods(this.settings, this.auth);
       if (res.ok && res.data && res.data.length > 0) {
         this.paymentMethods = res.data;

@@ -25,7 +25,7 @@ ArkUI (Index / Auth / Connect / Nodes / Plans / Account / WebSupport)
 
 ## 已复刻功能清单
 
-- **账户体系**：支持 **TizLink 默认 WHMCS 线路** (`v2raysocks_client.php`)、**V2Board 后端** (`/api/v1/...`)、以及**免登录直连订阅模式**；包含登录、注册（邮箱验证码 + 邀请码）、重置密码、修改密码、退出登录。
+- **账户体系**：与原版 TizLink 客户端一致，直连 TizLink 后端 (`v2raysocks_client.php`)，支持登录、注册、重置密码、修改密码、退出登录。
 - **连接控制**：深色暗夜玻璃拟态 UI（响应式适配手机底部胶囊栏 & 平板/折叠屏/2in1 左侧边栏），一键启停系统 VPN 隧道、实时上下行速率与累计流量统计、出口 IP 检测、智能分流 (`rule`) / 全局代理 (`global`) 一键切换。
 - **节点管理**：自动最优节点 (`AUTO` url-test)、国家/地区识别、协议标签 (`AEGIS` / `VLESS` / `VMESS` / `TROJAN` / `SS` / `HY2` / `TUIC` / `ANYTLS` / `SOCKS5`)、批量与单节点延迟测速、节点热切换、手动导入订阅链接/Clash YAML/节点 URI。
 - **订阅与商店**：套餐方案展示、多周期（月付/季付/半年/年付/一次性/重置流量）选择、优惠码、支付方式获取、下单并通过 ArkWeb 跳转支付、我的订单查询与取消。
