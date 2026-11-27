@@ -189,36 +189,80 @@ func StartTun(tunFd C.int, configYaml *C.char) *C.char {
 
 	// Bind HarmonyOS VpnExtensionAbility TUN fd into mihomo sing-tun
 	fd := int(tunFd)
+	var dupFd int
 	if fd > 0 {
+		var st syscall.Stat_t
+		if stErr := syscall.Fstat(fd, &st); stErr != nil {
+			appendLog(fmt.Sprintf("[libmihomo] Fstat(fd=%d) err: %v", fd, stErr))
+		} else {
+			appendLog(fmt.Sprintf("[libmihomo] Fstat(fd=%d) mode=0x%x, dev=%d, ino=%d", fd, st.Mode, st.Dev, st.Ino))
+		}
 		if nbErr := syscall.SetNonblock(fd, true); nbErr != nil {
 			appendLog(fmt.Sprintf("[libmihomo] SetNonblock(%d) warn: %v", fd, nbErr))
 		}
+		if d, dErr := syscall.Dup(fd); dErr == nil {
+			dupFd = d
+		} else {
+			dupFd = fd
+		}
 		cfg.General.Tun.Enable = true
-		cfg.General.Tun.FileDescriptor = fd
+		cfg.General.Tun.FileDescriptor = dupFd
 		cfg.General.Tun.Device = "vpn-tun"
 		cfg.General.Tun.Stack = CConst.TunGvisor
 		cfg.General.Tun.AutoRoute = false
 		cfg.General.Tun.AutoDetectInterface = false
 		cfg.General.Tun.AutoRedirect = false
-		if cfg.General.Tun.MTU == 0 {
-			cfg.General.Tun.MTU = 1500
+		cfg.General.Tun.MTU = 1500
+		if p, err := netip.ParsePrefix("172.19.0.1/30"); err == nil {
+			cfg.General.Tun.Inet4Address = []netip.Prefix{p}
 		}
-		if len(cfg.General.Tun.Inet4Address) == 0 {
-			if p, err := netip.ParsePrefix("172.19.0.1/30"); err == nil {
-				cfg.General.Tun.Inet4Address = []netip.Prefix{p}
-			}
-		}
-		if len(cfg.General.Tun.DNSHijack) == 0 {
-			cfg.General.Tun.DNSHijack = []string{"any:53"}
-		}
+		cfg.General.Tun.DNSHijack = []string{"any:53"}
 	}
 
 	statistic.DefaultManager.ResetStatistic()
 	hub.ApplyConfig(cfg)
-	running.Store(true)
+
 	tunConf := listener.GetTunConf()
-	appendLog(fmt.Sprintf("[libmihomo] StartTun OK (fd=%d, tunEnable=%v, stack=%s, proxies=%d)", fd, tunConf.Enable, tunConf.Stack.String(), len(cfg.Proxies)))
+	if fd > 0 && !tunConf.Enable {
+		gvisorErr := findLastTunError()
+		appendLog(fmt.Sprintf("[libmihomo] gVisor TUN failed (%s), falling back to System stack...", gvisorErr))
+		sysFd := fd
+		if d, dErr := syscall.Dup(fd); dErr == nil {
+			sysFd = d
+		}
+		sysTun := cfg.General.Tun
+		sysTun.Enable = true
+		sysTun.FileDescriptor = sysFd
+		sysTun.Stack = CConst.TunSystem
+		listener.ReCreateTun(sysTun, tunnel.Tunnel)
+		tunConf = listener.GetTunConf()
+		if !tunConf.Enable {
+			sysErr := findLastTunError()
+			msg := fmt.Sprintf("TUN 启动失败 (gVisor: %s | System: %s)", gvisorErr, sysErr)
+			appendLog("[libmihomo] " + msg)
+			return C.CString(msg)
+		}
+	}
+
+	running.Store(true)
+	appendLog(fmt.Sprintf("[libmihomo] StartTun OK (fd=%d, tunEnable=%v, stack=%s, addr=%v, proxies=%d)", fd, tunConf.Enable, tunConf.Stack.String(), tunConf.Inet4Address, len(cfg.Proxies)))
 	return C.CString("")
+}
+
+func findLastTunError() string {
+	// Wait briefly for async log subscriber to drain
+	time.Sleep(50 * time.Millisecond)
+	logMu.Lock()
+	defer logMu.Unlock()
+	for i := len(logRing) - 1; i >= 0; i-- {
+		if strings.Contains(logRing[i], "Start TUN listening error") || strings.Contains(logRing[i], "[TUN]") {
+			return logRing[i]
+		}
+	}
+	if len(logRing) > 0 {
+		return logRing[len(logRing)-1]
+	}
+	return "unknown"
 }
 
 //export Stop
