@@ -8,7 +8,8 @@ import { StorageService } from '../service/StorageService';
 
 const DOMAIN: number = 0x3200;
 const TAG: string = 'TizLinkVpnExt';
-export const VPN_STATUS_EVENT: string = 'com.example.tizlink.VPN_STATUS';
+export const APP_BUNDLE_NAME: string = 'com.tizlink.app';
+export const VPN_STATUS_EVENT: string = `${APP_BUNDLE_NAME}.VPN_STATUS`;
 
 export default class TizLinkVpnExtensionAbility extends VpnExtensionAbility {
   private vpnConnection: vpnExtension.VpnConnection | null = null;
@@ -85,7 +86,7 @@ export default class TizLinkVpnExtensionAbility extends VpnExtensionAbility {
       };
 
       // Split tunneling & self-exclusion to prevent VPN routing loop
-      const ownBundle: string = 'com.example.tizlink';
+      const ownBundle: string = APP_BUNDLE_NAME;
       if (settings.splitTunnelEnabled && settings.splitTunnelMode === 'only' && settings.splitTunnelApps.length > 0) {
         vpnConfig.trustedApplications = settings.splitTunnelApps.filter((pkg: string) => pkg !== ownBundle);
       } else {

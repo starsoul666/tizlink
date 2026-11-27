@@ -1,6 +1,6 @@
 {
   "app": {
-    "bundleName": "com.example.tizlink",
+    "bundleName": "com.tizlink.app",
     "vendor": "tizlink",
     "versionCode": 20020,
     "versionName": "2.0.20",

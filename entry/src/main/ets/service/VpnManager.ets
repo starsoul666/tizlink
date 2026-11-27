@@ -7,7 +7,7 @@ import { AppSettings, ProxyNode, RoutingMode, TrafficStats, VpnState } from '../
 import { StorageService } from './StorageService';
 import { MihomoConfigBuilder } from './MihomoConfigBuilder';
 import { MihomoControllerService } from './MihomoControllerService';
-import { VPN_STATUS_EVENT } from '../vpn/TizLinkVpnExtensionAbility';
+import { APP_BUNDLE_NAME, VPN_STATUS_EVENT } from '../vpn/TizLinkVpnExtensionAbility';
 
 const DOMAIN: number = 0x3200;
 const TAG: string = 'VpnManager';
@@ -97,7 +97,7 @@ export class VpnManager {
     await StorageService.getInstance().saveLastConfigYaml(configYaml);
 
     const want: Want = {
-      bundleName: 'com.example.tizlink',
+      bundleName: APP_BUNDLE_NAME,
       abilityName: 'TizLinkVpnExtensionAbility',
       parameters: {
         'configYaml': configYaml
@@ -119,7 +119,7 @@ export class VpnManager {
   async disconnect(): Promise<void> {
     this.notifyListeners('disconnecting', this.currentTraffic, '');
     const want: Want = {
-      bundleName: 'com.example.tizlink',
+      bundleName: APP_BUNDLE_NAME,
       abilityName: 'TizLinkVpnExtensionAbility'
     };
     try {
