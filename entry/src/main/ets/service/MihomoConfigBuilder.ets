@@ -16,6 +16,8 @@ export class MihomoConfigBuilder {
     lines.push(`mode: ${settings.routingMode}`);
     lines.push(`log-level: ${settings.logLevel}`);
     lines.push(`ipv6: ${settings.enableIpv6}`);
+    lines.push(`unified-delay: true`);
+    lines.push(`tcp-concurrent: true`);
     lines.push(`external-controller: 127.0.0.1:${settings.controllerPort}`);
     lines.push(`secret: ""`);
     lines.push(`geodata-mode: true`);

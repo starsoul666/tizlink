@@ -302,23 +302,79 @@ struct Index {
     const isConnected: boolean = this.vpnState === 'connected';
     const updated: ProxyNode[] = this.nodes.slice();
 
-    for (let i: number = 0; i < updated.length; i++) {
-      const n: ProxyNode = updated[i];
-      const ms: number = await ctrl.testNodeLatency(n, isConnected, this.settings.controllerPort);
-      updated[i] = {
-        id: n.id,
-        name: n.name,
-        type: n.type,
-        server: n.server,
-        port: n.port,
-        countryCode: n.countryCode,
-        regionLabel: n.regionLabel,
-        latencyMs: ms,
-        rawYamlLines: n.rawYamlLines,
-        rawUri: n.rawUri
-      };
+    // Fast path when VPN is connected: single concurrent Mihomo Go batch test (/group/PROXY/delay)
+    if (isConnected) {
+      const batchMap: Record<string, number> | null = await ctrl.testGroupDelayViaController(
+        this.settings.controllerPort,
+        'PROXY',
+        3000
+      );
+      if (batchMap !== null) {
+        for (let i: number = 0; i < updated.length; i++) {
+          const n: ProxyNode = updated[i];
+          const val: number | undefined = batchMap[n.name];
+          const ms: number = (typeof val === 'number' && val > 0) ? Math.round(val) : -2;
+          updated[i] = {
+            id: n.id,
+            name: n.name,
+            type: n.type,
+            server: n.server,
+            port: n.port,
+            countryCode: n.countryCode,
+            regionLabel: n.regionLabel,
+            latencyMs: ms,
+            rawYamlLines: n.rawYamlLines,
+            rawUri: n.rawUri
+          };
+        }
+        this.nodes = updated.slice();
+        this.testingLatency = false;
+        await StorageService.getInstance().saveNodes(this.nodes);
+        return;
+      }
+    }
+
+    // Disconnected (or fallback): pre-resolve unique hostnames once, then run parallel batches of 8
+    const uniqueHosts: Set<string> = new Set<string>();
+    for (const n of updated) {
+      if (n.server.length > 0) {
+        uniqueHosts.add(n.server);
+      }
+    }
+    const resolveTasks: Promise<string>[] = [];
+    uniqueHosts.forEach((h: string) => {
+      resolveTasks.push(ctrl.resolveHostIpv4(h));
+    });
+    await Promise.all(resolveTasks);
+
+    const concurrency: number = 8;
+    for (let start: number = 0; start < updated.length; start += concurrency) {
+      const end: number = Math.min(updated.length, start + concurrency);
+      const batchPromises: Promise<void>[] = [];
+      for (let idx: number = start; idx < end; idx++) {
+        const targetIndex: number = idx;
+        const n: ProxyNode = updated[targetIndex];
+        batchPromises.push(
+          ctrl.testNodeLatency(n, isConnected, this.settings.controllerPort).then((ms: number) => {
+            updated[targetIndex] = {
+              id: n.id,
+              name: n.name,
+              type: n.type,
+              server: n.server,
+              port: n.port,
+              countryCode: n.countryCode,
+              regionLabel: n.regionLabel,
+              latencyMs: ms,
+              rawYamlLines: n.rawYamlLines,
+              rawUri: n.rawUri
+            };
+          })
+        );
+      }
+      await Promise.all(batchPromises);
       this.nodes = updated.slice();
     }
+
     this.testingLatency = false;
     await StorageService.getInstance().saveNodes(this.nodes);
   }
